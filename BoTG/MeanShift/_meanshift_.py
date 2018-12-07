@@ -11,16 +11,13 @@ from sklearn.neighbors import NearestNeighbors
 #from joblib import Parallel, delayed
 from sklearn.externals.joblib import Parallel, delayed
 
-import time
-
-def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter):
-    start = time.time()
-    atual_point = X[idx_seed].todense()
+def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter, verbose=False):
+    atual_point = X[idx_seed]
     bandwidth = nbrs.get_params()['radius']
     stop_thresh = 1e-3 * bandwidth  # when mean has converged
     completed_iterations = 0
     while True:
-        points_within = nbrs.radius_neighbors(atual_point, return_distance=False)[0]
+        points_within = nbrs.radius_neighbors([atual_point], return_distance=False)[0]
         if len(points_within) == 0:
             idx_news = -1
             points_within = []
@@ -29,29 +26,20 @@ def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter):
         atual_point = X[points_within].mean(axis=0)
         thresh = np.linalg.norm(old_point - atual_point)
         if (thresh < stop_thresh or completed_iterations == max_iter):
-            idx_news      = nbrs.kneighbors(atual_point, n_neighbors=1, return_distance=False)[0][0]
-            points_within = nbrs.radius_neighbors(X[idx_news].todense(), return_distance=False)[0]
+            idx_news      = nbrs.kneighbors([atual_point], n_neighbors=1, return_distance=False)[0][0]
+            points_within = nbrs.radius_neighbors([X[idx_news]], return_distance=False)[0]
             break
         completed_iterations += 1
-    
-    #print( "seed:%d cluster:%05d iters:%03d thres:%.3f size:%03d time:%.3f" %
-    #(idx_seed, idx_news, completed_iterations, thresh, len(points_within), time.time()-start),
-    #flush=True, end="\r")
-    
     return idx_news, set(points_within)
 
-def build_clusters(X, n_jobs=8, max_iter=100, bandwidth=None, seeds=None, metric='cosine', proportion=30):
-    if bandwidth is None:
-        bandwidth = estimate_bandwidth(X, n_jobs, metric=metric, proportion=proportion, quantile=0.001)
-    if seeds is None:
-        seeds = estimate_seed(X)
+def build_clusters(X, n_jobs=8, max_iter=100, metric='cosine', quantile=0.0001, verbose=False):
+    bandwidth = estimate_bandwidth(X, n_jobs, metric=metric, quantile=quantile, verbose=verbose)
+    seeds = estimate_seed(X)
+
     nbrs = NearestNeighbors(radius=bandwidth, n_jobs=1, metric=metric).fit(X)
 
-    X_csr = X.tocsr()
-
-    all_res = Parallel(n_jobs=n_jobs)(delayed(__mean_shift_single_seed__) (idx_seed, X_csr, nbrs, max_iter) for idx_seed in tqdm(seeds, desc="Estimating clusters"))
-    #all_res = Parallel(n_jobs=n_jobs)(delayed(__mean_shift_single_seed__) (idx_seed, X_csr, nbrs, max_iter) for idx_seed in seeds)
-    #all_res = Parallel(n_jobs=self.n_jobs)(delayed(__mean_shift_single_seed__) (idx_seed) for idx_seed in self.seeds)
+    all_res = Parallel(n_jobs=n_jobs)(delayed(__mean_shift_single_seed__) (idx_seed, X, nbrs, max_iter) for idx_seed in tqdm(seeds, position=1, desc="Estimating clusters", disable=not verbose))
+    
     center_intensity_dict = [ (i, res) for i, res in enumerate(all_res) if res[0] >= 0 ]
     
     if not center_intensity_dict:
@@ -60,19 +48,19 @@ def build_clusters(X, n_jobs=8, max_iter=100, bandwidth=None, seeds=None, metric
     clusters = dict([ cluster for id_subgraph, cluster in center_intensity_dict ])
     mapper_subgraph_cluster = dict([ (id_subgraph, id_cluster) for id_subgraph, (id_cluster,_) in center_intensity_dict ])
 
-    clusters, mapper_subgraph_cluster = __dedup_clusters__(X, X_csr, nbrs, clusters, mapper_subgraph_cluster, bandwidth, max_iter, metric)
+    clusters, mapper_subgraph_cluster = __dedup_clusters__(X, nbrs, clusters, mapper_subgraph_cluster, bandwidth, max_iter, metric)
 
     result = { 'bandwidth': bandwidth, 'clusters':clusters, 'mapper_cluster': mapper_subgraph_cluster }
 
     return result
-def __dedup_clusters__(X, X_csr, nbrs, clusters, mapper_subgraph_cluster, bandwidth, max_iter=100, metric='cosine'):
+def __dedup_clusters__(X, nbrs, clusters, mapper_subgraph_cluster, bandwidth, max_iter=100, metric='cosine'):
     updated = True
     completed_iterations = 0
     while updated and completed_iterations < max_iter:
         updated = False
         sorted_clusters = sorted( clusters.items(), key=lambda tup: (len(tup[1]), tup[0]), reverse=True )
         unique = np.ones(len(sorted_clusters), dtype=np.bool)
-        centers = X_csr[np.array([cluster_id for cluster_id,_ in sorted_clusters])]
+        centers = X[np.array([cluster_id for cluster_id,_ in sorted_clusters])]
         nbrs_dedup = NearestNeighbors(radius=bandwidth, n_jobs=1, metric=metric).fit(centers)
         graph_of_dist = nbrs_dedup.radius_neighbors_graph(centers)
         available = [ (i, points) for (i, points) in list(enumerate(graph_of_dist)) if np.sum(points.A) > 1 ]
@@ -84,11 +72,12 @@ def __dedup_clusters__(X, X_csr, nbrs, clusters, mapper_subgraph_cluster, bandwi
                 for idx_point_to_dedup in idxs_points_to_dedup:
                     idx_cluster_to_dedup = sorted_clusters[idx_point_to_dedup][0]
                     unique[idx_point_to_dedup] = 0
-                    points_within = points_within.union( clusters[idx_cluster_to_dedup] )
-                    del clusters[idx_cluster_to_dedup]
+                    if idx_cluster_to_dedup in clusters:
+                        points_within = points_within.union( clusters[idx_cluster_to_dedup] )
+                        del clusters[idx_cluster_to_dedup]
                     
                 mean_point = X[np.array(list(points_within))].mean(axis=0)
-                idx_news = nbrs.kneighbors(mean_point, n_neighbors=1, return_distance=False)[0][0]
+                idx_news = nbrs.kneighbors([mean_point], n_neighbors=1, return_distance=False)[0][0]
                 unique[i] = idx_news == cluster_id
                 if not unique[i]:
                     del clusters[cluster_id]
@@ -99,20 +88,20 @@ def __dedup_clusters__(X, X_csr, nbrs, clusters, mapper_subgraph_cluster, bandwi
     return clusters, mapper_subgraph_cluster
 def estimate_seed(X):
     return range(X.shape[0])
-def estimate_bandwidth(X, n_jobs, metric='cosine', proportion=30, quantile=0.001):
+def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.001, verbose=False):
     n_neighbors = int(X.shape[0] * quantile)
 
     if n_neighbors < 1:  # cannot fit NearestNeighbors with n_neighbors = 0
         n_neighbors = 1
     
-    nbrs = NearestNeighbors(n_neighbors=n_neighbors, n_jobs=n_jobs, metric=metric)
-    nbrs.fit(X)
+    nbrs = NearestNeighbors(n_neighbors=n_neighbors, n_jobs=n_jobs, metric=metric).fit(X)
     
-    X_csr = X.tocsr()
-    
+    #proportion = 10
+    proportion = min(X.shape[0], 10)
+
     bandwidth = 0.
-    for batch in tqdm(gen_batches(X.shape[0], X.shape[0]//proportion), total=proportion, desc="Estimating bandwidth"):
-        xx = X_csr[batch, :]
+    for batch in tqdm(gen_batches(X.shape[0], max(1, X.shape[0]//proportion)), total=proportion, position=1, desc="Estimating bandwidth", disable=not verbose):
+        xx = X[batch]
         if not xx.shape[0]:
             break
         d, _ = nbrs.kneighbors(xx, return_distance=True)

@@ -237,9 +237,8 @@ class Collection(object):
         self.assignment(assignment_mode)
         self.pooling(pooling_mode)
 class Document(object):
-    def __init__(self, text, id=None, lan='en', w=1, kernel='norm'):
+    def __init__(self, text, lan='en', w=1, kernel='norm'):
         self.text = text
-        self.id = id
         self.lan = lan
         self.w = w
         self.assignment = None
@@ -250,8 +249,6 @@ class Document(object):
     def load_document(filepath, encoding='utf8', **kwargs):
         with open(filepath, "rb") as filin:
             text = filin.read().decode(errors='ignore')
-        if 'id' not in kwargs:
-            kwargs['id'] = path.basename(filepath)
         return Document(text, **kwargs)
     
     def __build_graph__(self):
