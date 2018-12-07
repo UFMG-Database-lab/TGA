@@ -27,7 +27,8 @@ from sklearn.base import BaseEstimator, TransformerMixin
 VALID_FORMATS = ['doc', 'raw', 'filename']
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
-    def __init__(self, format_doc='doc', w=2, lang='en', min_df=2, n_jobs=None, max_iter=100, metric='cosine', quantile=0.001, pooling='mean', assignment='hard'):
+    def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
+    n_jobs=None, max_iter=100, metric='cosine', quantile=0.001, pooling='mean', assignment='hard'):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
@@ -79,7 +80,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             M = np.eye(len(docs_within), dtype=np.float)
             for i, doc_i in tqdm(enumerate(docs_within), desc="Building distances", position=1, disable=not verbose):
                 for j, doc_j in enumerate(docs_within[:i]):
-                    M[i,j] = M[i,j] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+                    M[i,j] = M[j,i] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
             # result = { 'bandwidth': bandwidth, 'clusters':clusters, 'mapper_cluster': mapper_subgraph_cluster }
             result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
             for i, id_cluster in enumerate(result['clusters'].keys()):
