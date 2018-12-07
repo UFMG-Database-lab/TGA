@@ -90,15 +90,11 @@ def estimate_seed(X):
     return range(X.shape[0])
 def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.001, verbose=False):
     n_neighbors = int(X.shape[0] * quantile)
-
     if n_neighbors < 1:  # cannot fit NearestNeighbors with n_neighbors = 0
-        n_neighbors = 1
-    
+        n_neighbors = 2
     nbrs = NearestNeighbors(n_neighbors=n_neighbors, n_jobs=n_jobs, metric=metric).fit(X)
-    
     #proportion = 10
     proportion = min(X.shape[0], 10)
-
     bandwidth = 0.
     for batch in tqdm(gen_batches(X.shape[0], max(1, X.shape[0]//proportion)), total=proportion, position=1, desc="Estimating bandwidth", disable=not verbose):
         xx = X[batch]
