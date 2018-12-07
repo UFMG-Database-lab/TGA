@@ -39,9 +39,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.assignment = assignment
         self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
-        self._clusters = []
-        self._bandwidth_terms = []
-        self._bandwidth_clusters = []
+        
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
         if 'pooling' in fit_params:
@@ -49,11 +47,11 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if 'assignment' in fit_params:
             self.assignment = fit_params['assignment']
         
-        docs = self._get_documents_obj(X, _format, verbose=verbose)
+        docs = self._get_documents_obj_(X, _format, verbose=verbose)
         terms_idx = self._build_term_idx_(docs, verbose=verbose)
         if verbose:
                 self.statistics(docs, terms_idx)
-        self._clusters = self._build_clusters_(docs, terms_idx, verbose=verbose)
+        self._build_clusters_(docs, terms_idx, verbose=verbose)
 
         return self
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
@@ -71,19 +69,35 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     
     # private methods
     def _build_clusters_(self, docs, terms_idx, verbose=False):
-        clusters = []
+        self._clusters = []
+        self._labels = []
+
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]))
         for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
             docs_within = list(docs_within)
-            M = np.zeros((len(docs_within),len(docs_within)))
-            for i, doc_i in enumerate(docs_within):
+            M = np.eye(len(docs_within), dtype=np.float)
+            for i, doc_i in tqdm(enumerate(docs_within), desc="Building distances", position=1, disable=not verbose):
                 for j, doc_j in enumerate(docs_within[:i]):
                     M[i,j] = M[i,j] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+            # result = { 'bandwidth': bandwidth, 'clusters':clusters, 'mapper_cluster': mapper_subgraph_cluster }
             result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
-            
+            for i, id_cluster in enumerate(result['clusters'].keys()):
+                selected_subgraph = self._get_subgraph_(docs_within[id_cluster].G, term)
+                self._clusters.append( (term, selected_subgraph) )
+                self._labels.append( (term, i) )
+                # Se for construir uma representação sintética do cluster, usar
+                # o conjunto dos ids armazenados em result['clusters'][id_cluster]
+                # para recuperar os respectivos documentos em docs_within
 
-    def _get_documents_obj(self, X, format, verbose=False):
+    def _get_subgraph_(self, G, term):
+        g = nx.DiGraph()
+        g.add_edges_from( G.edges(term, data=True) )
+        for n in g.nodes:
+            for att in G.node[n]:
+                g.node[n][att] = G.node[n][att]
+        return g
+    def _get_documents_obj_(self, X, format, verbose=False):
         if format == 'doc':
             return X
         if format == 'raw':
