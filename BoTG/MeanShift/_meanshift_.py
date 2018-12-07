@@ -104,5 +104,5 @@ def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.001, verbose=False
         bandwidth += np.max(d, axis=1).sum()
     bandwidth /= X.shape[0]
     if bandwidth <= 0:
-        return 1./X.shape[0]
+        return 1.
     return bandwidth
