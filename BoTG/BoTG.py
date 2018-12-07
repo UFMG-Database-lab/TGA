@@ -51,12 +51,21 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
         docs = self._get_documents_obj(X, _format, verbose=verbose)
         terms_idx = self._build_term_idx_(docs, verbose=verbose)
+        self.statistics(docs, terms_idx)
         self._clusters = self._build_clusters_(docs, terms_idx, verbose=verbose)
 
         return self
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
         _format = self._validate_format_(format_doc)
         pass
+    def statistics(self, docs, terms_idx):
+        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
+        sizes = []
+        for term, docs_within in tqdm(terms_idx_, desc="Analysing terms idx size", position=0, disable=not verbose):
+            sizes.append(len(docs_within))
+        bins_count, bins = np.histogram(sizes, bins=10)
+        for i in range(len(bins[1:])):
+            print(bins[i-1], bins[i], bins_count[i])
     
     # private methods
     def _build_clusters_(self, docs, terms_idx, verbose=False):
