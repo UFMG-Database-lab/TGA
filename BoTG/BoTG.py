@@ -6,7 +6,7 @@ Created on Mon Nov 19 11:38:02 2018
 from segtok.segmenter import split_multi
 from segtok.tokenizer import web_tokenizer, split_contractions
 
-from DataRepresentation import Document
+from .DataRepresentation import Document
 
 import networkx as nx
 import numpy as np
@@ -14,14 +14,14 @@ import numpy as np
 from os import path
 import math
 
-from Utils import *
-from dissimilatires import dissimilarity_node
+from .Utils import *
+from .dissimilatires import dissimilarity_node
 from glob import glob
 from tqdm import tqdm
 
 from collections.abc import Iterable
 import multiprocessing
-from MeanShift._meanshift_ import build_clusters
+from .MeanShift._meanshift_ import build_clusters
 from sklearn.base import BaseEstimator, TransformerMixin
 
 VALID_FORMATS = ['doc', 'raw', 'filename']

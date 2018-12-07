@@ -13,18 +13,16 @@ import scipy.sparse
 from os import path
 import math
 
-from Utils import *
+from .Utils import *
 from glob import glob
 from tqdm import tqdm
-
-from sym_matrix import scsr_matrix, sdok_matrix
 
 from collections.abc import Iterable
 #from multiprocessing import Pool 
 
 import multiprocessing
 
-from MeanShift._meanshift_ import build_clusters
+from .MeanShift._meanshift_ import build_clusters
 
 
 def K(x, sigma=100.):
