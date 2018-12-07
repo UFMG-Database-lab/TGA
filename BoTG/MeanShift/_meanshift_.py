@@ -32,8 +32,12 @@ def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter, verbose=False):
         completed_iterations += 1
     return idx_news, set(points_within)
 
-def build_clusters(X, n_jobs=8, max_iter=100, metric='cosine', quantile=0.0001, verbose=False):
+def build_clusters(X, n_jobs=8, max_iter=100, metric='cosine', quantile=0.001, verbose=False):
     bandwidth = estimate_bandwidth(X, n_jobs, metric=metric, quantile=quantile, verbose=verbose)
+    
+    if bandwidth <= 0:
+        bandwidth = 1.
+
     seeds = estimate_seed(X)
 
     nbrs = NearestNeighbors(radius=bandwidth, n_jobs=1, metric=metric).fit(X)
@@ -104,5 +108,6 @@ def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.001, verbose=False
         bandwidth += np.max(d, axis=1).sum()
     bandwidth /= X.shape[0]
     if bandwidth <= 0:
+        print(X)
         return 1.
     return bandwidth
