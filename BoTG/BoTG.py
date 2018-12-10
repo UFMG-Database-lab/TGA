@@ -73,6 +73,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return np.array(X_result)
     
     # private methods
+
+    # Assignment functions
     #self._clusters = [ subgraph ]
     #self._labels = [ (term, id_cluster) ]
     #self._labels_map = { term: [id_cluster] }
@@ -112,6 +114,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             return self._unorm_assignment_
         raise ValueError("%s assignment does not available." % assignment) 
 
+    # Pooling functions
     def _mean_pooling_(self, X):
         return X.mean(axis=0)
     def _max_pooling_(self, X):
@@ -190,6 +193,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     terms_idx[v_term] = []
                 terms_idx[v_term].append( doc )
         return terms_idx
+    
     # Validations
     def _validate_format_(self, format_doc):
         _format = format_doc
