@@ -32,7 +32,7 @@ def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter, verbose=False):
         completed_iterations += 1
     return idx_news, set(points_within)
 
-def build_clusters(X, n_jobs=8, max_iter=100, metric='cosine', quantile=0.001, verbose=False):
+def build_clusters(X, n_jobs=8, max_iter=100, metric='cosine', quantile=0.1, verbose=False):
     bandwidth = estimate_bandwidth(X, n_jobs, metric=metric, quantile=quantile, verbose=verbose)
 
     seeds = estimate_seed(X)
@@ -89,7 +89,7 @@ def __dedup_clusters__(X, nbrs, clusters, mapper_subgraph_cluster, bandwidth, ma
     return clusters, mapper_subgraph_cluster
 def estimate_seed(X):
     return range(X.shape[0])
-def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.001, verbose=False):
+def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.1, verbose=False):
     n_neighbors = int(X.shape[0] * quantile)
     if n_neighbors < 1:  # cannot fit NearestNeighbors with n_neighbors = 0
         n_neighbors = 2
