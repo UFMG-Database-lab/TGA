@@ -138,7 +138,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _statistics_(self, docs, terms_idx):
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         sizes = []
-        for term, docs_within in tqdm(terms_idx_, desc="Analysing terms idx size", position=0):
+        for _, docs_within in tqdm(terms_idx_, desc="Analysing terms idx size", position=0):
             sizes.append(len(docs_within))
         bins_count, bins = np.histogram(sizes, bins=10)
         print("Statistics of terms idx sizes:")
@@ -150,7 +150,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._labels_map = {}
 
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
-        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]))
+        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
         for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
             docs_within = list(docs_within)
             M = np.eye(len(docs_within), dtype=np.float)
@@ -206,7 +206,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
 
 
-docs = Document.load_path('sample/*', verbose=True, w=3)
-botg = BoTG()
-botg.fit(docs, verbose=True)
-botg.transform(docs, assignment='soft', verbose=True)
+#docs = Document.load_path('sample/*', verbose=True, w=3)
+#botg = BoTG()
+#botg.fit(docs, verbose=True)
+#botg.transform(docs, assignment='soft', verbose=True)

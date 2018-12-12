@@ -8,8 +8,8 @@ import numpy as np
 from sklearn.utils import gen_batches
 from sklearn.neighbors import NearestNeighbors
 
-#from joblib import Parallel, delayed
-from sklearn.externals.joblib import Parallel, delayed
+from joblib import Parallel, delayed
+#from sklearn.externals.joblib import Parallel, delayed
 
 def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter, verbose=False):
     atual_point = X[idx_seed]
@@ -97,7 +97,8 @@ def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.1, verbose=False):
     #proportion = 10
     proportion = min(X.shape[0], 10)
     bandwidth = 0.
-    for batch in tqdm(gen_batches(X.shape[0], max(1, X.shape[0]//proportion)), total=proportion, position=1, desc="Estimating bandwidth", disable=not verbose):
+    batches = list(gen_batches(X.shape[0], max(round(X.shape[0]/proportion), 5000)))
+    for batch in tqdm(batches, total=len(batches), position=1, desc="Estimating bandwidth", disable=not verbose):
         xx = X[batch]
         if not xx.shape[0]:
             break
