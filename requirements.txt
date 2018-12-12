@@ -1,0 +1,8 @@
+segtok
+networkx
+numpy
+tqdm
+sklearn
+scipy
+nltk
+joblib
