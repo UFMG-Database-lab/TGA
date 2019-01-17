@@ -56,7 +56,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         terms_idx = self._build_term_idx_(docs, verbose=verbose)
         if verbose:
                 self._statistics_(docs, terms_idx)
-        self._build_clusters_(docs, terms_idx, verbose=verbose)
+        if "save_dist" in fit_params and fit_params['save_dist']:
+            self._save_distances_(docs, terms_idx, '../terms_matrix/', verbose=verbose)
+        else:
+            self._build_clusters_(docs, terms_idx, verbose=verbose)
 
         return self
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
@@ -144,6 +147,16 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         print("Statistics of terms idx sizes:")
         for i in range(len(bins)-1):
             print(" [%d;%d[ = %d" % (round(bins[i],0), round(bins[i+1],0), bins_count[i]))
+    def _save_distances_(self, docs, terms_idx, path_to_save, verbose=True):
+        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
+        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
+        for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
+            docs_within = list(docs_within)
+            M = np.eye(len(docs_within), dtype=np.float)
+            for i, doc_i in tqdm(enumerate(docs_within), desc="Building distances", total=len(docs_within), position=1, disable=not verbose):
+                for j, doc_j in enumerate(docs_within[:i]):
+                    M[i,j] = M[j,i] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+            np.savetxt("%s/%s.csv" % (path_to_save, term), M, delimiter=",")
     def _build_clusters_(self, docs, terms_idx, verbose=False):
         self._clusters = []
         self._labels = []
