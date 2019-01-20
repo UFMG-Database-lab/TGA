@@ -213,7 +213,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         matrix = df.values
         term_weight_list = np.matrix(term_weight_list).T
         matrix = np.nan_to_num(np.array(np.c_[ term_weight_list, matrix ]))
-        print('  \n\tSize matrix', M.shape)
+        print('  \n\tSize matrix', matrix.shape)
         M = pairwise_distances(matrix, metric=dissimilarity_row, n_jobs=self.n_jobs)
 
         return M, id_doc_to_avalable
