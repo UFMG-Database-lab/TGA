@@ -284,11 +284,3 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 #botg = BoTG()
 #botg.fit(docs, verbose=True)
 #botg.transform(docs, assignment='soft', verbose=True)
-
-
-from .DataRepresentation import Document
-docs = Document.load_path('/home/mangaravite/Documentos/datasets/20ng/docs/*', verbose=True)
-#docs = Document.load_path('/home/mangaravite/Documentos/datasets/kseries/raw/docs/*', verbose=True)
-
-botg = BoTG(format_doc='doc')
-botg.fit(docs, verbose=True)
