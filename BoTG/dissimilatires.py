@@ -43,7 +43,7 @@ def dissimilarity_row(A,B):
     was_value_A = np.logical_not(_A == 0)
     was_value_B = np.logical_not(_B == 0)
     or_values   = np.logical_or(was_value_A, was_value_B)  # conjunto de todos os termos q coocorem
-    
+
     _A = _A[or_values]
     _B = _B[or_values]
     # Tem valores não NaN
@@ -56,6 +56,8 @@ def dissimilarity_row(A,B):
     base = abs(wA-wB)
     diff_values = sum(abs(_A[and_values]-_B[and_values]))
     unmerged_values = sum(xor_values)
+
     dist = base + diff_values + unmerged_values
     iters = sum(or_values)+1 # Tamanho da união dos conjutos de termos de co-ocorrencia
+    
     return dist/iters
