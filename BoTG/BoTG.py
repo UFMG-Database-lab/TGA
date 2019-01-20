@@ -10,12 +10,13 @@ from .DataRepresentation import Document
 
 import networkx as nx
 import numpy as np
+import pandas as pd
 
 from os import path
 import math
 
 from .Utils import *
-from .dissimilatires import dissimilarity_node
+from .dissimilatires import dissimilarity_node, dissimilarity_row
 from glob import glob
 from tqdm import tqdm
 
@@ -23,6 +24,7 @@ from collections.abc import Iterable
 import multiprocessing
 from .MeanShift._meanshift_ import build_clusters
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.metrics import pairwise_distances
 
 VALID_FORMATS = ['doc', 'raw', 'filename']
 
@@ -59,7 +61,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if "save_dist" in fit_params and fit_params['save_dist']:
             self._save_distances_(docs, terms_idx, '../terms_matrix/', verbose=verbose)
         else:
-            self._build_clusters_(docs, terms_idx, verbose=verbose)
+            self._new_build_clusters_(docs, terms_idx, verbose=verbose)
 
         return self
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
@@ -153,10 +155,62 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
             docs_within = list(docs_within)
             M = np.eye(len(docs_within), dtype=np.float)
-            for i, doc_i in tqdm(enumerate(docs_within), desc="Building distances", total=len(docs_within), position=1, disable=not verbose):
-                for j, doc_j in enumerate(docs_within[:i]):
-                    M[i,j] = M[j,i] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+            total_iters = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
+            with tqdm(total=total_iters, desc="Building distances", position=1, disable=not verbose) as pbar:
+                for i, doc_i in enumerate(docs_within):
+                    for j, doc_j in enumerate(docs_within[:i]):
+                        M[i,j] = M[j,i] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+                        pbar.update(1)
             np.savetxt("%s/%s.csv" % (path_to_save, term), M, delimiter=",")
+    def _new_build_clusters_(self, docs, terms_idx, verbose=False):
+        self._clusters = []
+        self._labels = []
+        self._labels_map = {}
+
+        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
+        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
+        for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
+            docs_within = list(docs_within)
+
+            term_graph_list = [ nx.to_pandas_edgelist(self._get_subgraph_(doc.G, term)) for doc in docs_within ]
+            term_weight_list = []
+            id_doc_to_avalable = []
+            for i, doc in enumerate(term_graph_list):
+                doc['__docid__'] = i
+                if doc.size > 0:
+                    term_weight_list.append(docs_within[i].G.node[term]['weight'])
+                    id_doc_to_avalable.append(i)
+
+            df = pd.DataFrame()
+            for df_subgraph in term_graph_list:
+                df = df.append(df_subgraph, ignore_index=True, sort=True)
+            if df.size == 0:
+                continue
+            df = df.pivot_table(index=['source', '__docid__'], columns='target', values='weight')
+
+            matrix = df.values
+            term_weight_list = np.matrix(term_weight_list).T
+
+            matrix = np.nan_to_num(np.array(np.c_[ term_weight_list, matrix ]))
+
+            M = pairwise_distances(matrix, metric=dissimilarity_row, n_jobs=self.n_jobs)
+
+            # result = { 'bandwidth': bandwidth, 'clusters':clusters, 'mapper_cluster': mapper_subgraph_cluster }
+
+            ############################################################################################################
+            ########### Usar DBSCAN, observações no arquivo Documentos/clustering_analysis/observações.txt #############
+            ############################################################################################################
+
+            """result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
+            self._labels_map[term] = []
+            for i, id_cluster in enumerate(result['clusters'].keys()):
+                selected_subgraph = self._get_subgraph_(docs_within[id_cluster].G, term)
+                self._labels.append( (term, (i, len(self._clusters))) )
+                self._labels_map[term].append(len(self._clusters))
+                self._clusters.append( selected_subgraph )
+                # Se for construir uma representação sintética do cluster, usar
+                # o conjunto dos ids armazenados em result['clusters'][id_cluster]
+                # para recuperar os respectivos documentos em docs_within"""
     def _build_clusters_(self, docs, terms_idx, verbose=False):
         self._clusters = []
         self._labels = []
@@ -216,10 +270,14 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             raise ValueError("%s format does not available." % _format)
         return _format
 
-
-
-
 #docs = Document.load_path('sample/*', verbose=True, w=3)
 #botg = BoTG()
 #botg.fit(docs, verbose=True)
 #botg.transform(docs, assignment='soft', verbose=True)
+
+
+from .DataRepresentation import Document
+docs = Document.load_path('/home/mangaravite/Documentos/datasets/20ng/docs/*', verbose=True)
+
+botg = BoTG(format_doc='doc')
+botg.fit(docs, verbose=True)
