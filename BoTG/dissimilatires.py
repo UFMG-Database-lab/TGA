@@ -35,17 +35,20 @@ def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
     return dist / (len(all_terms_union)+1)
 
 def dissimilarity_row(A,B):
-    _A = A[1:]
-    _B = B[1:]
     wA = A[0]
     wB = B[0]
+    _A = A[1:]
+    _B = B[1:]
     # Tem valores não NaN
     was_value_A = np.logical_not(_A == 0)
     was_value_B = np.logical_not(_B == 0)
     or_values   = np.logical_or(was_value_A, was_value_B)  # conjunto de todos os termos q coocorem
-
-    was_value_A = was_value_A[or_values]
-    was_value_B = was_value_B[or_values]
+    
+    _A = _A[or_values]
+    _B = _B[or_values]
+    # Tem valores não NaN
+    was_value_A = np.logical_not(_A == 0)
+    was_value_B = np.logical_not(_B == 0)
 
     and_values  = np.logical_and(was_value_A, was_value_B) # conjunto que ambos termos tem
     xor_values  = np.logical_xor(was_value_A, was_value_B) # contar o número de vezes q um tem valor e o outro não
