@@ -18,9 +18,9 @@ from glob import glob
 from tqdm import tqdm
 
 from collections.abc import Iterable
-#from multiprocessing import Pool 
 
 import multiprocessing
+from multiprocessing import Pool
 
 #from .MeanShift._meanshift_ import build_clusters
 
@@ -43,16 +43,19 @@ class Document(object):
             text = filin.read().decode(errors='ignore')
         return Document(text, **kwargs)
     @staticmethod
-    def load_path(filepattern, verbose=False, **kwargs):
+    def _load_document_(param):
+         return Document.load_document(param[0], **param[1])
+    @staticmethod
+    def load_path(filepattern, n_jobs=multiprocessing.cpu_count(), verbose=False, **kwargs):
         docs = []
         if isinstance(filepattern, str):
             docs_path = glob(filepattern)
         else:
             docs_path = filepattern
-        for filepath in tqdm(docs_path, desc="Loading and building documents", total=len(docs_path), disable=not verbose):
-            with open(filepath, "rb") as filin:
-                text = filin.read().decode(errors='ignore')
-            docs.append(Document(text, **kwargs))
+        docs_path = [ (filepath, kwargs) for filepath in docs_path ]
+        with Pool(processes=n_jobs) as p:
+            for doc in tqdm(p.imap(Document._load_document_, docs_path), total=len(docs_path), desc="Loading and building documents", disable=not verbose):
+                docs.append(doc)
         return docs
     
     def __build_graph__(self):
