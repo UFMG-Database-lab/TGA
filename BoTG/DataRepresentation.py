@@ -22,7 +22,7 @@ from collections.abc import Iterable
 
 import multiprocessing
 
-from .MeanShift._meanshift_ import build_clusters
+#from .MeanShift._meanshift_ import build_clusters
 
 
 def K(x, sigma=100.):
