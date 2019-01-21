@@ -63,9 +63,7 @@ class Document(object):
         for sentence in sentences_str:
             buffer = []
             for word in sentence:
-                if len([c for c in word if c in EXCLUDE]) == len(word): # If the word is based on exclude chars
-                    buffer = []
-                elif word.lower() in stopwords or word.replace('.','').replace(',','').replace('-','').isnumeric():
+                if len([c for c in word if c in EXCLUDE]) == len(word) or word.lower() in stopwords or word.replace('.','').replace(',','').replace('-','').isnumeric():
                     continue
                 else:
                     #stemmed_word = lemma(word).lower()

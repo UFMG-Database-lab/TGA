@@ -1,10 +1,17 @@
 import numpy as np
 
-def dissimilarity_node(GA, GB, term):
+def dissimilarity_node_out(GA, GB, term):
     neighborsGA = GA[term]
     neighborsGB = GB[term]
     weightA = GA.node[term]['weight']
     weightB = GB.node[term]['weight']
+    return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
+
+def dissimilarity_node_in(GA, GB, term):
+    weightA = GA.node[term]['weight']
+    weightB = GB.node[term]['weight']
+    neighborsGA = dict([(node,D) for node,_,D in  GA.in_edges(term, data=True)])
+    neighborsGB = dict([(node,D) for node,_,D in  GB.in_edges(term, data=True)])
     return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
 def dissimilarity_node_both(GA, GB, term):
@@ -21,8 +28,7 @@ def dissimilarity_node_both(GA, GB, term):
 
     return (in_dissimilarity+out_dissimilarity)/2.
 
-
-def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
+def __compute_diss_2__(neighborsGA, weightA, neighborsGB, weightB):
     all_terms_union = set(neighborsGA.keys()).union(set(neighborsGB.keys()))
 
     dist = abs(weightA-weightB)
@@ -34,6 +40,19 @@ def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
             dist += 1.
     return dist / (len(all_terms_union)+1)
 
+def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
+    values_A = set(neighborsGA.keys())
+    values_B = set(neighborsGB.keys())
+    
+    size_union = len(values_A.union(values_B))
+    intersection_neigh = values_A.intersection(values_B)
+
+    dist = abs(weightA-weightB) + len( values_A ^ values_B ) # values_A ^ values_B = XOR(values_A, values_B)
+    
+    for term_2 in intersection_neigh:
+        dist += abs( neighborsGA[term_2]['weight'] - neighborsGB[term_2]['weight'] )
+    return dist / (size_union+1)
+
 def dissimilarity_row(A,B):
     wA = A[0]
     wB = B[0]
@@ -42,7 +61,7 @@ def dissimilarity_row(A,B):
     # Tem valores não NaN
     was_value_A = np.logical_not(_A == 0)
     was_value_B = np.logical_not(_B == 0)
-    
+
     or_values   = np.logical_or(was_value_A, was_value_B)  # conjunto de todos os termos q coocorem
     and_values  = np.logical_and(was_value_A, was_value_B) # conjunto que ambos termos tem
     xor_values  = np.logical_xor(was_value_A, was_value_B) # contar o número de vezes q um tem valor e o outro não

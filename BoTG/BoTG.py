@@ -16,7 +16,7 @@ from os import path
 import math
 
 from .Utils import *
-from .dissimilatires import dissimilarity_node, dissimilarity_row, dissimilarity_node_both
+from .dissimilatires import dissimilarity_node_in, dissimilarity_node_out, dissimilarity_node_both, dissimilarity_row
 from glob import glob
 from tqdm import tqdm
 
@@ -25,6 +25,8 @@ import multiprocessing
 from .MeanShift._meanshift_ import build_clusters
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import pairwise_distances
+from sklearn import cluster
+
 import time
 
 VALID_FORMATS = ['doc', 'raw', 'filename']
@@ -35,7 +37,7 @@ def K(x, sigma=100.):
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
-    n_jobs=None, max_iter=100, metric='cosine', quantile=0.1, pooling='mean', assignment='hard'):
+    n_jobs=None, max_iter=100, direction='both', metric='cosine', quantile=0.01, pooling='mean', assignment='hard'):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
@@ -44,6 +46,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.metric = metric
         self.quantile = quantile
         self.pooling = pooling
+        self.direction = direction
         self.assignment = assignment
         self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
@@ -62,8 +65,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if "save_dist" in fit_params and fit_params['save_dist']:
             self._save_distances_(docs, terms_idx, '../terms_matrix/', verbose=verbose)
         else:
-            self._new_build_clusters_(docs, terms_idx, verbose=verbose) # 6/79734 [17:00]
-            #self._build_clusters_(docs, terms_idx, verbose=verbose)      # 1/79734 [22:31]
+            #self._new_build_clusters_(docs, terms_idx, verbose=verbose) # 6/79734 [17:00]
+            self._build_clusters_(docs, terms_idx, verbose=verbose)      # 1/79734 [22:31]
 
         return self
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
@@ -161,7 +164,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             with tqdm(total=total_iters, desc="Building distances", position=1, disable=not verbose) as pbar:
                 for i, doc_i in enumerate(docs_within):
                     for j, doc_j in enumerate(docs_within[:i]):
-                        M[i,j] = M[j,i] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+                        M[i,j] = M[j,i] = 1.-dissimilarity_node_both(doc_i.G, doc_j.G, term)
                         pbar.update(1)
             np.savetxt("%s/%s.csv" % (path_to_save, term), M, delimiter=",")
     def _new_build_clusters_(self, docs, terms_idx, verbose=False):
@@ -207,14 +210,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 df = df.append(df_subgraph, sort=True)
                 term_weight_list.append(docs_within[i].G.node[term]['weight'])
                 id_doc_to_avalable.append(i)
-        if df.size == 0:
+        if df.size < 2:
             return None, None
         df = df.pivot_table(index=['source', '__docid__'], columns='target', values='weight')
         matrix = df.values
         term_weight_list = np.matrix(term_weight_list).T
         matrix = np.nan_to_num(np.array(np.c_[ term_weight_list, matrix ]))
-        print('  \n\n\n\tSize matrix', matrix.shape)
+        print(' \n\n Size matrix', matrix.shape, end='')
         M = pairwise_distances(matrix, metric=dissimilarity_row, n_jobs=self.n_jobs)
+        print(M.shape)
 
         return M, id_doc_to_avalable
     def _build_clusters_(self, docs, terms_idx, verbose=False):
@@ -224,17 +228,30 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
-        for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
-            docs_within = list(docs_within)
-            M = np.eye(len(docs_within), dtype=np.float)
-            total_itens = int(((len(docs_within)*len(docs_within))-len(docs_within))/2)
-            with tqdm(desc="Building distances", total=total_itens, position=1, disable=not verbose) as pbar:
+
+        total_itens = sum( [ int(((len(docs_within)*len(docs_within))-len(docs_within))/2) for _, docs_within in terms_idx_ ] )
+        with tqdm(desc="Building distances", total=total_itens, position=0, disable=not verbose) as pbar:
+            for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose):
+                docs_within = list(docs_within)
+                M = np.eye(len(docs_within), dtype=np.float)
+
+                if self.direction == 'out':
+                    dissimilarity_func = dissimilarity_node_out
+                elif self.direction == 'in':
+                    dissimilarity_func = dissimilarity_node_in
+                elif self.direction == 'both':
+                    dissimilarity_func = dissimilarity_node_both
+
                 for i, doc_i in enumerate(docs_within):
                     #all_res = Parallel(n_jobs=self.n_jobs)(delayed(dissimilarity_node_both) (doc_i.G, doc_j.G, term) for doc_j in docs_within[:i])
                     #M[i,:i] = M[:i,i] = 1.-np.array(all_res)
                     for j, doc_j in enumerate(docs_within[:i]):
-                        M[i,j] = M[j,i] = 1.-dissimilarity_node(doc_i.G, doc_j.G, term)
+                        M[i,j] = M[j,i] = 1.-dissimilarity_func(doc_i.G, doc_j.G, term)
                         pbar.update(1)
+            eps = np.percentile(M.ravel(), q=self.quantile)
+            min_samples = int(np.sqrt(M.shape[0]))
+            dbscan = cluster.DBSCAN(n_jobs=self.n_jobs, eps=eps, min_samples=min_samples, metric=self.metric)
+            clusters = dbscan.fit_predict(M)
             # result = { 'bandwidth': bandwidth, 'clusters':clusters, 'mapper_cluster': mapper_subgraph_cluster }
             """result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
             self._labels_map[term] = []
