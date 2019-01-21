@@ -201,10 +201,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         id_doc_to_avalable = []
         df = pd.DataFrame()
         for i, df_subgraph in tqdm(enumerate(term_graph_list), desc="Building term-matrix", position=1, total=len(term_graph_list), disable=not verbose):
-            df_subgraph['__docid__'] = i
-            df_subgraph.set_index(['source', '__docid__'])
-            df = df.append(df_subgraph, sort=True)
             if df_subgraph.size > 0:
+                df_subgraph['__docid__'] = i
+                df_subgraph.set_index(['source', '__docid__'])
+                df = df.append(df_subgraph, sort=True)
                 term_weight_list.append(docs_within[i].G.node[term]['weight'])
                 id_doc_to_avalable.append(i)
         if df.size == 0:
@@ -213,7 +213,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         matrix = df.values
         term_weight_list = np.matrix(term_weight_list).T
         matrix = np.nan_to_num(np.array(np.c_[ term_weight_list, matrix ]))
-        print('  \n\tSize matrix', matrix.shape)
+        print('  \n\n\n\tSize matrix', matrix.shape)
         M = pairwise_distances(matrix, metric=dissimilarity_row, n_jobs=self.n_jobs)
 
         return M, id_doc_to_avalable
