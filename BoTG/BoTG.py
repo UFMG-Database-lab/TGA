@@ -223,7 +223,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         chunks_atual = []
         for (term, docs_within) in array_to_chunk:
             n_items = len(list(docs_within))
-            size_chunk = 1.2*(n_items*n_items*size_float + sys.getsizeof(docs_within)) # uma matriz quadratica de floats + tamanho dos documento adcionado de um overhead de memoria de 10%
+            size_chunk = 2*(n_items*n_items*size_float + sys.getsizeof(docs_within)) # uma matriz quadratica de floats + tamanho dos documento adcionado de um overhead de memoria de 10%
             old_qtd_thread = qtd_threads
             while size_chunk > max_size_chunk and qtd_threads > 1:
                 qtd_threads -= 1
