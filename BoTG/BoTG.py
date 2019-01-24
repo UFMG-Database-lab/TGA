@@ -217,13 +217,14 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         qtd_threads = self.n_jobs
         max_size_chunk = 1./qtd_threads * aval
         
-        size_float = np.float64(0).nbytes
+        size_float = sys.getsizeof(np.float64(0))
         
         chunks = []
         chunks_atual = []
         for (term, docs_within) in array_to_chunk:
             n_items = len(list(docs_within))
-            size_chunk = 2*(n_items*n_items*size_float + sys.getsizeof(docs_within)) # uma matriz quadratica de floats + tamanho dos documento adcionado de um overhead de memoria de 10%
+            size_chunk = n_items*n_items*size_float # uma matriz quadratica de floats
+            #size_chunk = 2.1*(n_items*n_items*size_float + sys.getsizeof(docs_within)) # uma matriz quadratica de floats + tamanho dos documento adcionado de um overhead de memoria de 10%
             old_qtd_thread = qtd_threads
             while size_chunk > max_size_chunk and qtd_threads > 1:
                 qtd_threads -= 1
@@ -277,7 +278,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         with tqdm(desc="Building distances", total=total_itens, position=0, disable=not verbose) as pbar:
             for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose):
                 docs_within = list(docs_within)
-                M = np.eye(len(docs_within), dtype=np.float)
+                M = np.eye(len(docs_within), dtype=np.float64)
 
                 for i, doc_i in enumerate(docs_within):
                     #all_res = Parallel(n_jobs=self.n_jobs)(delayed(dissimilarity_node_both) (doc_i.G, doc_j.G, term) for doc_j in docs_within[:i])
