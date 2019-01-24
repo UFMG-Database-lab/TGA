@@ -211,7 +211,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
 
     def _define_chunks_(self, array_to_chunk):
-        import psutil
+        import psutil, sys
 
         aval = psutil.virtual_memory().available
         qtd_threads = self.n_jobs
@@ -223,7 +223,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         chunks_atual = []
         for (term, docs_within) in array_to_chunk:
             n_items = len(list(docs_within))
-            size_chunk = n_items*n_items*size_float # uma matriz quadratica de floats
+            size_chunk = 1.2*(n_items*n_items*size_float + sys.getsizeof(docs_within)) # uma matriz quadratica de floats + tamanho dos documento adcionado de um overhead de memoria de 10%
             old_qtd_thread = qtd_threads
             while size_chunk > max_size_chunk and qtd_threads > 1:
                 qtd_threads -= 1
