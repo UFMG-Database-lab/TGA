@@ -40,7 +40,8 @@ def K(x, sigma=100.):
 
 def size_item(item, size_float):
     term, docs_within = item
-    return 2.5*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))    
+    return len(docs_within)*len(docs_within)*size_float
+    #return 2.5*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))
 
 def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func = params
@@ -202,7 +203,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
         
-        chunks = list(reversed(self._define_chunks_2_(terms_idx_, verbose=verbose)))
+        chunks = list(self._define_chunks_2_(terms_idx_, verbose=verbose))
         if verbose:
             print("Chunked process:")
             for i, terms_idx_chunk in enumerate(chunks):
@@ -218,7 +219,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _define_chunks_2_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
         
-        size_float = np.float64(0).nbytes
+        #size_float = np.float64(0).nbytes
+        size_float = sys.getsizeof(np.float64(0))
+        
         finished_chunks = []
         chunks = [ (size_item(array_to_chunk[0], size_float), [array_to_chunk[0]]) ]
         
