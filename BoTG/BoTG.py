@@ -15,6 +15,8 @@ import pandas as pd
 from os import path
 import math
 
+import psutil, sys, operator
+
 from .Utils import *
 from .dissimilatires import dissimilarity_node_in, dissimilarity_node_out, dissimilarity_node_both, dissimilarity_row
 from glob import glob
@@ -35,7 +37,11 @@ VALID_FORMATS = ['doc', 'raw', 'filename']
 
 def K(x, sigma=100.):
     return np.exp( -(np.power(x,2.)/(2.*np.power(sigma,2.))) ) / (sigma*np.sqrt(2*np.pi))        
-    
+
+def size_item(item, size_float):
+    term, docs_within = item
+    return 2.5*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))    
+
 def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func = params
     docs_within = list(docs_within)
@@ -47,7 +53,7 @@ def process_term(params):
     min_samples = int(np.sqrt(M.shape[0]))
     dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
     clusters = dbscan.fit_predict(M)
-    return clusters
+    return term, clusters
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
@@ -194,22 +200,51 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             dissimilarity_func = dissimilarity_node_both
 
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
-        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]))
+        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
         
-        chunks = list(reversed(self._define_chunks_(terms_idx_)))
+        chunks = list(reversed(self._define_chunks_2_(terms_idx_, verbose=verbose)))
         if verbose:
             print("Chunked process:")
-            for n_jobs_atual, terms_idx_chunk in chunks:
-                print("   n_jobs=%d with %d terms" % (n_jobs_atual, len(terms_idx_chunk)))
+            for i, terms_idx_chunk in enumerate(chunks):
+                print(" iter=%d with %d terms" % (i, len(terms_idx_chunk)))
 
-        for n_jobs_atual, terms_idx_chunk in chunks:
+        for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose):
             params = [(term, docs, self.quantile, self.metric, dissimilarity_func) for (term, docs) in terms_idx_chunk]
-            with Pool(processes=n_jobs_atual) as p:
-                for cluster in tqdm(p.imap(process_term, params), total=len(params), desc="Building Clusters (n_threads=%d)" % n_jobs_atual, disable=not verbose):
+            with Pool(processes=self.n_jobs) as p:
+                for term, cluster in tqdm(p.imap(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
                     pass
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
-
+    def _define_chunks_2_(self, array_to_chunk, verbose=False):
+        aval = psutil.virtual_memory().available
+        
+        size_float = np.float64(0).nbytes
+        finished_chunks = []
+        chunks = [ (size_item(array_to_chunk[0], size_float), [array_to_chunk[0]]) ]
+        
+        for item in tqdm(array_to_chunk[1:], total=len(array_to_chunk)-1, desc="Defining chunks", disable=not verbose):
+            create_new_chunk = True
+            size_atual_item = size_item(item, size_float)
+            chunks = sorted(chunks, key=lambda x: x[0])
+            for id_chunk in range(len(chunks)):
+                size_chunk, chunk = chunks[id_chunk]
+                if (size_chunk + size_atual_item) < aval:
+                    chunk.append(item)
+                    if len(chunk) == self.n_jobs:
+                        finished_chunks.append( chunk )
+                        chunks.pop(id_chunk)
+                    else:
+                        chunks[id_chunk] = ((size_chunk+size_atual_item), chunk)
+                    create_new_chunk = False
+                    break
+            if create_new_chunk:
+                if len(finished_chunks) > 0:
+                    id_chunk = min(enumerate([ len(chunk) for chunk in finished_chunks ]), key=operator.itemgetter(1))[0]
+                    finished_chunks[id_chunk].append(item)
+                else:
+                    chunks.append( (size_atual_item,[item]) )
+        finished_chunks.extend( [ chunk for _,chunk in chunks ] )
+        return finished_chunks
     def _define_chunks_(self, array_to_chunk):
         import psutil, sys
 
@@ -226,7 +261,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             n_items = len(list(docs_within))
             #size_chunk = n_items*n_items*size_float # uma matriz quadratica de floats
 
-            # uma matriz quadratica de floats + tamanho da lista dos documentos (considerando a copia dos objs e um overhead de dissimilaridade)
+            # uma matriz quadratica de floats + tamanho da lista dos documentos (considerando a copia dos objs e um overhead de +50% [hard overhead])
             size_chunk = 2.5*(n_items*n_items*size_float + sys.getsizeof(docs_within))
             
             old_qtd_thread = qtd_threads
