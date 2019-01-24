@@ -194,15 +194,46 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             dissimilarity_func = dissimilarity_node_both
 
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
-        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
+        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]))
         
-        params = [(term, docs, self.quantile, self.metric, dissimilarity_func) for (term, docs) in terms_idx_]
+        chunks = list(reversed(self._define_chunks_(terms_idx_)))
+        if verbose:
+            print("Chunked process:")
+            for n_jobs_atual, terms_idx_chunk in chunks:
+                print("   n_jobs=%d with %d terms" % (n_jobs_atual, len(terms_idx_chunk)))
 
-        with Pool(self.n_jobs) as p:
-            for cluster in tqdm(p.imap(process_term, params), total=len(params), desc="Building Clusters", disable=not verbose):
-                pass
+        for n_jobs_atual, terms_idx_chunk in chunks:
+            params = [(term, docs, self.quantile, self.metric, dissimilarity_func) for (term, docs) in terms_idx_chunk]
+            with Pool(processes=n_jobs_atual) as p:
+                for cluster in tqdm(p.imap(process_term, params), total=len(params), desc="Building Clusters (n_threads=%d)" % n_jobs_atual, disable=not verbose):
+                    pass
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
+
+    def _define_chunks_(self, array_to_chunk):
+        import psutil
+
+        aval = psutil.virtual_memory().available
+        qtd_threads = self.n_jobs
+        max_size_chunk = 1./qtd_threads * aval
+        
+        size_float = np.float64(0).nbytes
+        
+        chunks = []
+        chunks_atual = []
+        for (term, docs_within) in array_to_chunk:
+            n_items = len(list(docs_within))
+            size_chunk = n_items*n_items*size_float # uma matriz quadratica de floats
+            old_qtd_thread = qtd_threads
+            while size_chunk > max_size_chunk and qtd_threads > 1:
+                qtd_threads -= 1
+                max_size_chunk = 1./qtd_threads * aval
+            if qtd_threads != old_qtd_thread:
+                chunks.append( (old_qtd_thread, chunks_atual) )
+                chunks_atual = []
+            chunks_atual.append( (term, docs_within) )
+        chunks.append( (old_qtd_thread, chunks_atual) )
+        return chunks
 
     def _build_matrix_(self, docs_within, term, verbose=False):
         term_graph_list = [ nx.to_pandas_edgelist(self._get_subgraph_(doc.G, term)) for doc in tqdm(docs_within, desc="Building edgelist", position=1, disable=not verbose) ]
@@ -308,3 +339,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 #botg = BoTG()
 #botg.fit(docs, verbose=True)
 #botg.transform(docs, assignment='soft', verbose=True)
+
+# import importlib
+# importlib.reload(BoTG.BoTG)
