@@ -30,6 +30,8 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import pairwise_distances
 from sklearn import cluster
 
+import random
+
 from joblib import Parallel, delayed
 import time
 
@@ -40,8 +42,8 @@ def K(x, sigma=100.):
 
 def size_item(item, size_float):
     term, docs_within = item
-    return len(docs_within)*len(docs_within)*size_float
-    #return 2.5*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))
+    #return len(docs_within)*len(docs_within)*size_float
+    return 2.5*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))
 
 def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func = params
@@ -247,6 +249,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 else:
                     chunks.append( (size_atual_item,[item]) )
         finished_chunks.extend( [ chunk for _,chunk in chunks ] )
+        #list(map(random.shuffle, finished_chunks))
+        #finished_chunks = [ list(reversed(chunk)) for chunk in finished_chunks ]
         return finished_chunks
     def _define_chunks_(self, array_to_chunk):
         import psutil, sys
