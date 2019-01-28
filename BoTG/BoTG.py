@@ -83,8 +83,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
         terms_idx = self._build_term_idx_(docs, verbose=verbose)
-        if verbose:
-                self._statistics_(docs, terms_idx)
         if "save_dist" in fit_params and fit_params['save_dist']:
             self._save_distances_(docs, terms_idx, '../terms_matrix/', verbose=verbose)
         else:
@@ -168,15 +166,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         raise ValueError("%s pooling does not available." % pooling) 
     
     # Algorithm methods
-    def _statistics_(self, docs, terms_idx):
-        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
+    def _statistics_(self, terms_idx):
+        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx if len(docs_within) >= self.min_df ]
         sizes = []
-        for _, docs_within in tqdm(terms_idx_, desc="Analysing terms idx size", position=0):
+        for _, docs_within in terms_idx_:
             sizes.append(len(docs_within))
-        bins_count, bins = np.histogram(sizes, bins=10)
-        print("Statistics of terms idx sizes:")
+        n_bins = min( 10, max(1, int(len(sizes)/2)) )
+        bins_count, bins = np.histogram(sizes, bins=n_bins)
         for i in range(len(bins)-1):
-            print(" [%d;%d[ = %d" % (round(bins[i],0), round(bins[i+1],0), bins_count[i]))
+            print("   [%d;%d[ = %d" % (round(bins[i],0), round(bins[i+1],0), bins_count[i]))
     def _save_distances_(self, docs, terms_idx, path_to_save, verbose=True):
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
@@ -210,6 +208,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             print("Chunked process:")
             for i, terms_idx_chunk in enumerate(chunks):
                 print(" iter=%d with %d terms" % (i, len(terms_idx_chunk)))
+                self._statistics_(terms_idx_chunk)
 
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose):
             params = [(term, docs, self.quantile, self.metric, dissimilarity_func) for (term, docs) in terms_idx_chunk]
