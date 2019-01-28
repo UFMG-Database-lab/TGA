@@ -43,7 +43,7 @@ def K(x, sigma=100.):
 def size_item(item, size_float):
     term, docs_within = item
     #return len(docs_within)*len(docs_within)*size_float
-    return 2.5*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))
+    return 4*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))
 
 def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func = params
