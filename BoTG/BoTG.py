@@ -214,7 +214,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose):
             params = [(term, docs, self.quantile, self.metric, dissimilarity_func) for (term, docs) in terms_idx_chunk]
             with Pool(processes=self.n_jobs) as p:
-                for term, cluster in tqdm(p.imap(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
+                for term, cluster in tqdm(p.imap_unordered(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
                     pass
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
