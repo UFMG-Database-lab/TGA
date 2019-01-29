@@ -13,7 +13,7 @@ import scipy.sparse
 from os import path
 import math
 
-from .Utils import *
+from .Utils import get_stopwords,get_stem,EXCLUDE
 from glob import glob
 from tqdm import tqdm
 

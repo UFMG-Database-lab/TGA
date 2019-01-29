@@ -43,15 +43,17 @@ def K(x, sigma=100.):
 def size_item(item, size_float):
     term, docs_within = item
     #return len(docs_within)*len(docs_within)*size_float
-    return 4*(len(docs_within)*len(docs_within)*size_float + sys.getsizeof(docs_within))
+    return 8*(len(docs_within)*len(docs_within)*size_float + 2*sys.getsizeof(docs_within))
 
 def process_term(params):
-    term, docs_within, quantile, metric, dissimilarity_func = params
+    term, docs_within, quantile, metric, dissimilarity_func, verbose = params
     docs_within = list(docs_within)
     M = np.eye(len(docs_within), dtype=np.float)
-    for i, doc_i in enumerate(docs_within):
-        for j, doc_j in enumerate(docs_within[:i]):
-            M[i,j] = M[j,i] = 1.-dissimilarity_func(doc_i.G, doc_j.G, term)
+    qtd_total = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
+    with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose) as pbar:
+        for i, doc_i in enumerate(docs_within):
+            M[i,i:] = M[i:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[i:] ]
+            pbar.update(len(docs_within)-i)
     eps = np.percentile(M.ravel(), q=quantile)
     min_samples = int(np.sqrt(M.shape[0]))
     dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
@@ -174,7 +176,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         n_bins = min( 10, max(1, int(len(sizes)/2)) )
         bins_count, bins = np.histogram(sizes, bins=n_bins)
         for i in range(len(bins)-1):
-            print("   [%d;%d[ = %d" % (round(bins[i],0), round(bins[i+1],0), bins_count[i]))
+            if bins_count[i] > 0:
+                print("   [%d;%d[ = %d" % (round(bins[i],0), round(bins[i+1],0), bins_count[i]))
     def _save_distances_(self, docs, terms_idx, path_to_save, verbose=True):
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
@@ -203,23 +206,31 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
         
-        chunks = list(self._define_chunks_2_(terms_idx_, verbose=verbose))
+        chunks = list(self._define_chunks_(terms_idx_, verbose=verbose))
         if verbose:
             print("Chunked process:")
             for i, terms_idx_chunk in enumerate(chunks):
-                print(" iter=%d with %d terms" % (i, len(terms_idx_chunk)))
+                end_chars = 's\n'
+                if len(terms_idx_chunk) == 1:
+                    end_chars = ''
+                print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
 
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose):
-            params = [(term, docs, self.quantile, self.metric, dissimilarity_func) for (term, docs) in terms_idx_chunk]
-            with Pool(processes=self.n_jobs) as p:
-                for term, cluster in tqdm(p.imap_unordered(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
-                    pass
+            if len(terms_idx_chunk) < self.n_jobs:
+                for (term, docs) in tqdm(terms_idx_chunk, total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                    (term, cluster) = process_term( (term, docs, self.quantile, self.metric, dissimilarity_func, verbose) )
+            else:
+                params = [(term, docs, self.quantile, self.metric, dissimilarity_func, False) for (term, docs) in terms_idx_chunk]
+                with Pool(processes=self.n_jobs) as p:
+                    for term, cluster in tqdm(p.imap_unordered(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
+                        pass
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
-    def _define_chunks_2_(self, array_to_chunk, verbose=False):
+    def _define_chunks_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
-        
+        aval -= 0.5*aval
+
         #size_float = np.float64(0).nbytes
         size_float = sys.getsizeof(np.float64(0))
         
@@ -248,39 +259,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 else:
                     chunks.append( (size_atual_item,[item]) )
         finished_chunks.extend( [ chunk for _,chunk in chunks ] )
-        #list(map(random.shuffle, finished_chunks))
-        #finished_chunks = [ list(reversed(chunk)) for chunk in finished_chunks ]
+        #finished_chunks = list(reversed(finished_chunks))
         return finished_chunks
-    def _define_chunks_(self, array_to_chunk):
-        import psutil, sys
-
-        aval = psutil.virtual_memory().available
-        qtd_threads = self.n_jobs
-        max_size_chunk = 1./qtd_threads * aval
-        
-        #size_float = sys.getsizeof(np.float64(0))
-        size_float = np.float64(0).nbytes
-        
-        chunks = []
-        chunks_atual = []
-        for (term, docs_within) in array_to_chunk:
-            n_items = len(list(docs_within))
-            #size_chunk = n_items*n_items*size_float # uma matriz quadratica de floats
-
-            # uma matriz quadratica de floats + tamanho da lista dos documentos (considerando a copia dos objs e um overhead de +50% [hard overhead])
-            size_chunk = 2.5*(n_items*n_items*size_float + sys.getsizeof(docs_within))
-            
-            old_qtd_thread = qtd_threads
-            while size_chunk > max_size_chunk and qtd_threads > 1:
-                qtd_threads -= 1
-                max_size_chunk = 1./qtd_threads * aval
-            if qtd_threads != old_qtd_thread:
-                chunks.append( (old_qtd_thread, chunks_atual) )
-                chunks_atual = []
-            chunks_atual.append( (term, docs_within) )
-        chunks.append( (old_qtd_thread, chunks_atual) )
-        return chunks
-
+    
     def _build_matrix_(self, docs_within, term, verbose=False):
         term_graph_list = [ nx.to_pandas_edgelist(self._get_subgraph_(doc.G, term)) for doc in tqdm(docs_within, desc="Building edgelist", position=1, disable=not verbose) ]
         term_weight_list = []
