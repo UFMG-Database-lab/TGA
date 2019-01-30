@@ -60,6 +60,27 @@ def process_term(params):
     clusters = dbscan.fit_predict(M)
     return term, clusters
 
+def apply_diss(params):
+    (dissimilarity_func, i, doc_i, docs_within, term) = params
+    return i, [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within ]
+
+def process_term_parallel(params):
+    term, docs_within, n_jobs, quantile, metric, dissimilarity_func, verbose = params
+    docs_within = list(docs_within)
+    M = np.eye(len(docs_within), dtype=np.float)
+    qtd_total = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
+    with Pool(processes=n_jobs) as p:
+        with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose) as pbar:
+            params_parallel = [ (dissimilarity_func, i, doc_i, docs_within[i:], term) for i, doc_i in enumerate(docs_within) ]
+            for i,values in p.imap_unordered( apply_diss, params_parallel ):
+                M[i,i:] = M[i:,i] = values
+                pbar.update(len(values))
+    eps = np.percentile(M.ravel(), q=quantile)
+    min_samples = int(np.sqrt(M.shape[0]))
+    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
+    clusters = dbscan.fit_predict(M)
+    return term, clusters
+
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
     n_jobs=None, max_iter=100, direction='both', metric='cosine', quantile=0.01, pooling='mean', assignment='hard'):
@@ -217,14 +238,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 self._statistics_(terms_idx_chunk)
 
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose):
-            if len(terms_idx_chunk) < self.n_jobs:
-                for (term, docs) in tqdm(terms_idx_chunk, total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                    (term, cluster) = process_term( (term, docs, self.quantile, self.metric, dissimilarity_func, verbose) )
-            else:
+            if len(terms_idx_chunk) > self.n_jobs:
                 params = [(term, docs, self.quantile, self.metric, dissimilarity_func, False) for (term, docs) in terms_idx_chunk]
                 with Pool(processes=self.n_jobs) as p:
                     for term, cluster in tqdm(p.imap_unordered(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
                         pass
+            else:
+                for (term, docs) in tqdm(terms_idx_chunk, total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                    #(_, cluster) = process_term( (term, docs, self.quantile, self.metric, dissimilarity_func, verbose) )
+                    (_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
     def _define_chunks_(self, array_to_chunk, verbose=False):
@@ -259,7 +281,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 else:
                     chunks.append( (size_atual_item,[item]) )
         finished_chunks.extend( [ chunk for _,chunk in chunks ] )
-        #finished_chunks = list(reversed(finished_chunks))
+        finished_chunks = list(reversed(finished_chunks))
+        list(map(random.shuffle,finished_chunks))
         return finished_chunks
     
     def _build_matrix_(self, docs_within, term, verbose=False):
