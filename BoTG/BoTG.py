@@ -28,6 +28,7 @@ from multiprocessing import Pool
 #from .MeanShift._meanshift_ import build_clusters
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import pairwise_distances
+from sklearn.neighbors import NearestNeighbors 
 from sklearn import cluster
 
 import random
@@ -50,32 +51,16 @@ def process_term(params):
     docs_within = list(docs_within)
     M = np.eye(len(docs_within), dtype=np.float)
     qtd_total = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
-    with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose) as pbar:
+    with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose, smoothing=0.) as pbar:
         for i, doc_i in enumerate(docs_within):
-            M[i,i:] = M[i:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[i:] ]
+            j = i+1
+            M[i,j:] = M[j:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ]
             pbar.update(len(docs_within)-i)
-    eps = np.percentile(M.ravel(), q=quantile)
-    min_samples = int(np.sqrt(M.shape[0]))
-    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
-    clusters = dbscan.fit_predict(M)
-    return term, clusters
-
-def apply_diss(params):
-    (dissimilarity_func, i, doc_i, docs_within, term) = params
-    return i, [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within ]
-
-def process_term_parallel(params):
-    term, docs_within, n_jobs, quantile, metric, dissimilarity_func, verbose = params
-    docs_within = list(docs_within)
-    M = np.eye(len(docs_within), dtype=np.float)
-    qtd_total = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
-    with Pool(processes=n_jobs) as p:
-        with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose) as pbar:
-            params_parallel = [ (dissimilarity_func, i, doc_i, docs_within[i:], term) for i, doc_i in enumerate(docs_within) ]
-            for i,values in p.imap_unordered( apply_diss, params_parallel ):
-                M[i,i:] = M[i:,i] = values
-                pbar.update(len(values))
-    eps = np.percentile(M.ravel(), q=quantile)
+    nn = NearestNeighbors(metric=metric)
+    nn_data = nn.fit(M).radius_neighbors_graph(mode='distance')
+    eps = 0.1
+    if len(nn_data.nonzero()[0]) > 0:
+        eps = np.percentile(nn_data[nn_data.nonzero()].ravel(), q=quantile)
     min_samples = int(np.sqrt(M.shape[0]))
     dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
     clusters = dbscan.fit_predict(M)
@@ -119,9 +104,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         _pooling_ = self._get_pooling_function_(pooling)
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
         X_result = []
-        for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose):
+        for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
             terms_assignments = []
-            for term in tqdm(doc.G.nodes, desc="Building terms", total=len(doc.G.nodes), position=1, disable=not verbose):
+            for term in tqdm(doc.G.nodes, desc="Building terms", total=len(doc.G.nodes), position=1, disable=not verbose, smoothing=0.):
                 terms_assignments.append( _assignment_(term, doc.G) )
             X_result.append( _pooling_(np.array(terms_assignments)) )
         return np.array(X_result)
@@ -237,16 +222,12 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
 
-        for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose):
-            if len(terms_idx_chunk) > self.n_jobs:
-                params = [(term, docs, self.quantile, self.metric, dissimilarity_func, False) for (term, docs) in terms_idx_chunk]
-                with Pool(processes=self.n_jobs) as p:
-                    for term, cluster in tqdm(p.imap_unordered(process_term, params), total=len(params), position=1, desc="Building Clusters", disable=not verbose):
-                        pass
-            else:
-                for (term, docs) in tqdm(terms_idx_chunk, total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                    #(_, cluster) = process_term( (term, docs, self.quantile, self.metric, dissimilarity_func, verbose) )
-                    (_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
+        for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
+            params = [(term, docs, self.quantile, self.metric, dissimilarity_func, len(terms_idx_chunk) == 1) for (term, docs) in terms_idx_chunk]
+            with Pool(processes=self.n_jobs) as p:
+                for term, cluster in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(params), position=1, desc="Building Clusters", disable=not verbose):
+                    pass
+                    #(_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
     def _define_chunks_(self, array_to_chunk, verbose=False):
@@ -259,7 +240,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         finished_chunks = []
         chunks = [ (size_item(array_to_chunk[0], size_float), [array_to_chunk[0]]) ]
         
-        for item in tqdm(array_to_chunk[1:], total=len(array_to_chunk)-1, desc="Defining chunks", disable=not verbose):
+        for item in tqdm(array_to_chunk[1:], total=len(array_to_chunk)-1, desc="Defining chunks", disable=not verbose, smoothing=0.):
             create_new_chunk = True
             size_atual_item = size_item(item, size_float)
             chunks = sorted(chunks, key=lambda x: x[0])
@@ -286,11 +267,11 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return finished_chunks
     
     def _build_matrix_(self, docs_within, term, verbose=False):
-        term_graph_list = [ nx.to_pandas_edgelist(self._get_subgraph_(doc.G, term)) for doc in tqdm(docs_within, desc="Building edgelist", position=1, disable=not verbose) ]
+        term_graph_list = [ nx.to_pandas_edgelist(self._get_subgraph_(doc.G, term)) for doc in tqdm(docs_within, smoothing=0., desc="Building edgelist", position=1, disable=not verbose) ]
         term_weight_list = []
         id_doc_to_avalable = []
         df = pd.DataFrame()
-        for i, df_subgraph in tqdm(enumerate(term_graph_list), desc="Building term-matrix", position=1, total=len(term_graph_list), disable=not verbose):
+        for i, df_subgraph in tqdm(enumerate(term_graph_list), smoothing=0., desc="Building term-matrix", position=1, total=len(term_graph_list), disable=not verbose):
             if df_subgraph.size > 0:
                 df_subgraph['__docid__'] = i
                 df_subgraph.set_index(['source', '__docid__'])
@@ -324,8 +305,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
 
         total_itens = sum( [ int(((len(docs_within)*len(docs_within))-len(docs_within))/2) for _, docs_within in terms_idx_ ] )
-        with tqdm(desc="Building distances", total=total_itens, position=0, disable=not verbose) as pbar:
-            for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose):
+        with tqdm(desc="Building distances", total=total_itens, position=0, disable=not verbose, smoothing=0.) as pbar:
+            for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose, smoothing=0.):
                 docs_within = list(docs_within)
                 M = np.eye(len(docs_within), dtype=np.float64)
 
@@ -364,7 +345,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if format == 'doc':
             return X
         if format == 'raw':
-            return [ Document(text, lan=self.lang, w=self.w) for text in tqdm(X, desc="Building documents", disable=not verbose) ]
+            return [ Document(text, lan=self.lang, w=self.w) for text in tqdm(X, smoothing=0., desc="Building documents", disable=not verbose) ]
         if format == 'filename':
             return Document.load_path(X, lan=self.lang, w=self.w)
     def _build_term_idx_(self, docs, verbose=False):
