@@ -81,6 +81,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.assignment = assignment
         self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
+
+        if self.direction == 'out':
+            self.dissimilarity_func = dissimilarity_node_out
+        elif self.direction == 'in':
+            self.dissimilarity_func = dissimilarity_node_in
+        elif self.direction == 'both':
+            self.dissimilarity_func = dissimilarity_node_both
         
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
@@ -121,7 +128,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         result = np.zeros(len(self._clusters))
         if term not in self._labels_map:
             return result
-        values = [ (id_cluster, dissimilarity_node(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]
+        values = [ (id_cluster, self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]
         j = min(values, key=lambda x: x[1] )[0]
         result[j] = 1.
         return result
@@ -129,7 +136,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         result = np.ones(len(self._clusters))
         if term not in self._labels_map:
             return result / result.sum()
-        j, values = list(zip(*[ (id_cluster, dissimilarity_node(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
+        j, values = list(zip(*[ (id_cluster, self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
         result[list(j)] = list(values)
         result = K(result)
         return result / result.sum()
@@ -137,7 +144,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         result = np.zeros(len(self._clusters))
         if term not in self._labels_map:
             return result
-        j, values = list(zip(*[ (id_cluster, 1.-dissimilarity_node(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
+        j, values = list(zip(*[ (id_cluster, 1.-self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
         result[list(j)] = list(values)
         return result / result.sum()
     def _get_assignment_function_(self, assignment):
@@ -194,7 +201,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             with tqdm(total=total_iters, desc="Building distances", position=1, disable=not verbose) as pbar:
                 for i, doc_i in enumerate(docs_within):
                     for j, doc_j in enumerate(docs_within[:i]):
-                        M[i,j] = M[j,i] = 1.-dissimilarity_node_both(doc_i.G, doc_j.G, term)
+                        M[i,j] = M[j,i] = 1.-self.dissimilarity_func(doc_i.G, doc_j.G, term)
                         pbar.update(1)
             np.savetxt("%s/%s.csv" % (path_to_save, term), M, delimiter=",")
     def _new_build_clusters_(self, docs, terms_idx, verbose=False):
@@ -202,14 +209,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._labels = []
         self._labels_map = {}
 
-        if self.direction == 'out':
-            dissimilarity_func = dissimilarity_node_out
-        elif self.direction == 'in':
-            dissimilarity_func = dissimilarity_node_in
-        elif self.direction == 'both':
-            dissimilarity_func = dissimilarity_node_both
-
-        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
+        terms_idx_ = [ (term, list(docs_within)) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
         
         chunks = list(self._define_chunks_(terms_idx_, verbose=verbose))
@@ -223,14 +223,37 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 self._statistics_(terms_idx_chunk)
 
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
-            params = [(term, docs, self.quantile, self.metric, dissimilarity_func, len(terms_idx_chunk) == 1) for (term, docs) in terms_idx_chunk]
+            params = self._make_params_(terms_idx_chunk, len(terms_idx_chunk) == 1 and verbose)
             with Pool(processes=self.n_jobs) as p:
-                for term, cluster in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(params), position=1, desc="Building Clusters", disable=not verbose):
-                    pass
+                for term, cluster in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                    self._labels_map[term] = []
+                    docs_within = terms_idx[term]
+                    mapper = [ [] for i in range(max(cluster)+1) ]
+                    list(map(lambda x: mapper[x[1]].append(docs_within[x[0]].G), [ (i,x) for (i,x) in enumerate(cluster) if x >=0 ]))
+                    for i, doc_in_cluster in enumerate(mapper):
+                        # map subgraphs
+                        subgraphs = list(map(lambda x: self._get_subgraph_(x, term) , doc_in_cluster))
+                        # reduce subgraphs
+                        selected_subgraph = [] # subgraph
+                        self._labels.append( (term, (i, len(self._clusters))) )
+                        self._labels_map[term].append(len(self._clusters))
+                        self._clusters.append( selected_subgraph )
+                    """
+                    result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
+                    self._labels_map[term] = []
+                    for i, id_cluster in enumerate(result['clusters'].keys()):
+                        selected_subgraph = self._get_subgraph_(docs_within[id_cluster].G, term)
+                        self._labels.append( (term, (i, len(self._clusters))) )
+                        self._labels_map[term].append(len(self._clusters))
+                        self._clusters.append( selected_subgraph )
+                        # Se for construir uma representação sintética do cluster, usar
+                        # o conjunto dos ids armazenados em result['clusters'][id_cluster]
+                        # para recuperar os respectivos documentos em docs_within
+                    """
                     #(_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
-    def _define_chunks_(self, array_to_chunk, verbose=False):
+    def _define_chunks_2_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
         aval -= 0.5*aval
 
@@ -262,75 +285,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 else:
                     chunks.append( (size_atual_item,[item]) )
         finished_chunks.extend( [ chunk for _,chunk in chunks ] )
-        finished_chunks = list(reversed(finished_chunks))
+        #finished_chunks = list(reversed(finished_chunks))
         list(map(random.shuffle,finished_chunks))
         return finished_chunks
-    
-    def _build_matrix_(self, docs_within, term, verbose=False):
-        term_graph_list = [ nx.to_pandas_edgelist(self._get_subgraph_(doc.G, term)) for doc in tqdm(docs_within, smoothing=0., desc="Building edgelist", position=1, disable=not verbose) ]
-        term_weight_list = []
-        id_doc_to_avalable = []
-        df = pd.DataFrame()
-        for i, df_subgraph in tqdm(enumerate(term_graph_list), smoothing=0., desc="Building term-matrix", position=1, total=len(term_graph_list), disable=not verbose):
-            if df_subgraph.size > 0:
-                df_subgraph['__docid__'] = i
-                df_subgraph.set_index(['source', '__docid__'])
-                df = df.append(df_subgraph, sort=True)
-                term_weight_list.append(docs_within[i].G.node[term]['weight'])
-                id_doc_to_avalable.append(i)
-        if df.size < 2:
-            return None, None
-        df = df.pivot_table(index=['source', '__docid__'], columns='target', values='weight')
-        matrix = df.values
-        term_weight_list = np.matrix(term_weight_list).T
-        matrix = np.nan_to_num(np.array(np.c_[ term_weight_list, matrix ]))
-        print(' \n\n Size matrix', matrix.shape, end='')
-        M = pairwise_distances(matrix, metric=dissimilarity_row, n_jobs=self.n_jobs)
-        print(M.shape)
-
-        return M, id_doc_to_avalable
-    def _build_clusters_(self, docs, terms_idx, verbose=False):
-        self._clusters = []
-        self._labels = []
-        self._labels_map = {}
-
-        if self.direction == 'out':
-            dissimilarity_func = dissimilarity_node_out
-        elif self.direction == 'in':
-            dissimilarity_func = dissimilarity_node_in
-        elif self.direction == 'both':
-            dissimilarity_func = dissimilarity_node_both
-
-        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
-        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
-
-        total_itens = sum( [ int(((len(docs_within)*len(docs_within))-len(docs_within))/2) for _, docs_within in terms_idx_ ] )
-        with tqdm(desc="Building distances", total=total_itens, position=0, disable=not verbose, smoothing=0.) as pbar:
-            for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose, smoothing=0.):
-                docs_within = list(docs_within)
-                M = np.eye(len(docs_within), dtype=np.float64)
-
-                for i, doc_i in enumerate(docs_within):
-                    #all_res = Parallel(n_jobs=self.n_jobs)(delayed(dissimilarity_node_both) (doc_i.G, doc_j.G, term) for doc_j in docs_within[:i])
-                    #M[i,:i] = M[:i,i] = 1.-np.array(all_res)
-                    for j, doc_j in enumerate(docs_within[:i]):
-                        M[i,j] = M[j,i] = 1.-dissimilarity_func(doc_i.G, doc_j.G, term)
-                        pbar.update(1)
-            eps = np.percentile(M.ravel(), q=self.quantile)
-            min_samples = int(np.sqrt(M.shape[0]))
-            dbscan = cluster.DBSCAN(n_jobs=self.n_jobs, eps=eps, min_samples=min_samples, metric=self.metric)
-            clusters = dbscan.fit_predict(M)
-            # result = { 'bandwidth': bandwidth, 'clusters':clusters, 'mapper_cluster': mapper_subgraph_cluster }
-            """result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
-            self._labels_map[term] = []
-            for i, id_cluster in enumerate(result['clusters'].keys()):
-                selected_subgraph = self._get_subgraph_(docs_within[id_cluster].G, term)
-                self._labels.append( (term, (i, len(self._clusters))) )
-                self._labels_map[term].append(len(self._clusters))
-                self._clusters.append( selected_subgraph )
-                # Se for construir uma representação sintética do cluster, usar
-                # o conjunto dos ids armazenados em result['clusters'][id_cluster]
-                # para recuperar os respectivos documentos em docs_within"""
+    def _define_chunks_(self, array_to_chunk, verbose=False):
+        array_to_chunk_2 = array_to_chunk
+        random.shuffle(array_to_chunk_2)
+        return [ array_to_chunk_2 ]
     def _get_subgraph_(self, G, term):
         g = nx.DiGraph()
         g.add_edges_from( G.edges(term, data=True) )
@@ -356,7 +317,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     terms_idx[v_term] = []
                 terms_idx[v_term].append( doc )
         return terms_idx
-    
+    def _make_params_(self,terms_idx_chunk, verbose):
+        for (term, docs) in terms_idx_chunk:
+            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, verbose)
     # Validations
     def _validate_format_(self, format_doc):
         _format = format_doc
