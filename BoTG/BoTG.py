@@ -231,7 +231,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
             params = self._make_params_(terms_idx_chunk, len(terms_idx_chunk) == 1 and verbose)
-            with Pool(processes=self.n_jobs) as p:
+            with Pool(processes=self.n_jobs-1) as p:
                 for term, cluster in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                     self._labels_map[term] = []
                     docs_within = terms_idx[term]
