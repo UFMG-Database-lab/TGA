@@ -300,30 +300,51 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         random.shuffle(array_to_chunk_2)
         return [ array_to_chunk_2 ]
     def _define_chunks_soft_(self, array_to_chunk, verbose=False):
+        bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
+        size_bins = int(sum(bins_count[1:])/2)
+        chunks = [[] for _ in range(size_bins)]
+        rev_ = True
+        for i, item in enumerate(array_to_chunk):
+            idx = i % len(chunks)
+            if idx == 0:
+                rev_ = not rev_
+            if rev_:
+                idx = len(chunks)-idx-1
+            chunks[idx].append(item)
+        chunks = list(reversed(chunks))
+        #list(map(random.shuffle,chunks))
+        return chunks
+    def _define_chunks_soft_2_(self, array_to_chunk, verbose=False):
         i = 0
         j = len(array_to_chunk)-1
+        
+        bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
+        size_bins = sum(bins_count[1:])
+
         chunks_aux = []
         while i < j:
             big = array_to_chunk[i]
             size_big = len(big[1])^2
             chunk = [big]
             size_small = 0
-            while (size_small+len(array_to_chunk[j][1])^2) <= size_big or len(chunk) < self.n_jobs:
-                if i == j:
-                    break
+            while ((size_small+len(array_to_chunk[j][1])^2) <= size_big or len(chunk) < size_bins) and i != j:
                 small = array_to_chunk[j]
                 chunk.append(small)
                 size_small += len(small[1])^2
                 j -= 1
             chunks_aux.append(chunk)
             i += 1
-        
-        bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
-        size_bins = sum(bins_count[5:])
         chunks = [[] for _ in range(size_bins)]
+        rev_ = True
         for i in range(len(chunks_aux)):
             idx = i % len(chunks)
+            if idx == 0:
+                rev_ = not rev_
+            if rev_:
+                idx = len(chunks)-idx-1
             chunks[idx].extend(chunks_aux[i])
+        #chunks = list(reversed(chunks))
+        #list(map(random.shuffle,chunks))
         return chunks
     def _get_subgraph_(self, G, term):
         g = nx.DiGraph()
