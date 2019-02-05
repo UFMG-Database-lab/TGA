@@ -230,7 +230,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 self._statistics_(terms_idx_chunk)
 
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
-            params = self._make_params_(terms_idx_chunk, len(terms_idx_chunk) == 1 and verbose)
+            params = self._make_params_(terms_idx_chunk, verbose)
             with Pool(processes=self.n_jobs) as p:
                 for term, cluster in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                     self._labels_map[term] = []
@@ -301,7 +301,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return [ array_to_chunk_2 ]
     def _define_chunks_soft_(self, array_to_chunk, verbose=False):
         bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
-        size_bins = int(sum(bins_count[1:])/2)
+        size_bins = int(sum(bins_count[1:])/(self.n_jobs/2))
         chunks = [[] for _ in range(size_bins)]
         rev_ = True
         for i, item in enumerate(array_to_chunk):
@@ -311,7 +311,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             if rev_:
                 idx = len(chunks)-idx-1
             chunks[idx].append(item)
-        chunks = list(reversed(chunks))
+        #chunks = list(reversed(chunks))
         #list(map(random.shuffle,chunks))
         return chunks
     def _define_chunks_soft_2_(self, array_to_chunk, verbose=False):
@@ -372,8 +372,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 terms_idx[v_term].append( doc )
         return terms_idx
     def _make_params_(self,terms_idx_chunk, verbose):
-        for (term, docs) in terms_idx_chunk:
-            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, verbose)
+        for i, (term, docs) in enumerate(terms_idx_chunk):
+            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, i == 0 and verbose)
     # Validations
     def _validate_format_(self, format_doc):
         _format = format_doc
