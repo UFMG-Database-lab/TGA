@@ -301,7 +301,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return [ array_to_chunk_2 ]
     def _define_chunks_soft_(self, array_to_chunk, verbose=False):
         bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
-        size_bins = int(sum(bins_count[1:])/(self.n_jobs/2))
+        size_bins = int(sum(bins_count[1:]))
         chunks = [[] for _ in range(size_bins)]
         rev_ = True
         for i, item in enumerate(array_to_chunk):
