@@ -68,7 +68,7 @@ def process_term(params):
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
-    n_jobs=None, max_iter=100, direction='both', metric='cosine', quantile=0.01, pooling='mean', assignment='hard'):
+    n_jobs=None, max_iter=100, direction='both', metric='cosine', memory_strategy='soft', quantile=0.01, pooling='mean', assignment='hard'):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
@@ -77,11 +77,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.metric = metric
         self.quantile = quantile
         self.pooling = pooling
-        self.direction = direction
         self.assignment = assignment
         self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
-
+        self.direction = direction
         if self.direction == 'out':
             self.dissimilarity_func = dissimilarity_node_out
         elif self.direction == 'in':
@@ -89,6 +88,14 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         elif self.direction == 'both':
             self.dissimilarity_func = dissimilarity_node_both
         
+        self.memory_strategy = memory_strategy
+        if self.memory_strategy == 'norm':
+            self._chunk_strategy = self._define_chunks_
+        elif self.memory_strategy == 'hard':
+            self._chunk_strategy = self._define_chunks_hard_
+        elif self.memory_strategy == 'soft':
+            self._chunk_strategy = self._define_chunks_soft_
+
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
         if 'pooling' in fit_params:
@@ -212,7 +219,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         terms_idx_ = [ (term, list(docs_within)) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
         
-        chunks = list(self._define_chunks_(terms_idx_, verbose=verbose))
+        chunks = list(self._chunk_strategy(terms_idx_, verbose=verbose))
         if verbose:
             print("Chunked process:")
             for i, terms_idx_chunk in enumerate(chunks):
@@ -253,7 +260,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     #(_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
-    def _define_chunks_2_(self, array_to_chunk, verbose=False):
+    def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
         aval -= 0.5*aval
 
@@ -292,6 +299,31 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         array_to_chunk_2 = array_to_chunk
         random.shuffle(array_to_chunk_2)
         return [ array_to_chunk_2 ]
+    def _define_chunks_soft_(self, array_to_chunk, verbose=False):
+        i = 0
+        j = len(array_to_chunk)-1
+        chunks_aux = []
+        while i < j:
+            big = array_to_chunk[i]
+            size_big = len(big[1])^2
+            chunk = [big]
+            size_small = 0
+            while (size_small+len(array_to_chunk[j][1])^2) <= size_big or len(chunk) < self.n_jobs:
+                if i == j:
+                    break
+                small = array_to_chunk[j]
+                chunk.append(small)
+                size_small += len(small[1])^2
+                j -= 1
+            chunks_aux.append(chunk)
+            i += 1
+        
+        bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=5)
+        chunks = [[] for _ in range(bins_count[-1])]
+        for i in range(len(chunks_aux)):
+            idx = i % len(chunks)
+            chunks[idx].extend(chunks_aux[i])
+        return chunks
     def _get_subgraph_(self, G, term):
         g = nx.DiGraph()
         g.add_edges_from( G.edges(term, data=True) )
