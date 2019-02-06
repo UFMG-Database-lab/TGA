@@ -62,13 +62,13 @@ def process_term(params):
         for i, doc_i in enumerate(docs_within):
             j = i+1
             M[i,j:] = M[j:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ]
-            pbar.update(len(docs_within)-i)
-    M = NearestNeighbors(metric=metric).fit(M).radius_neighbors_graph(mode='distance')
+            pbar.update(len(docs_within)-j)
+    #M = NearestNeighbors(metric=metric).fit(M).radius_neighbors_graph(mode='distance')
     eps = 0.1
-    if len(M.nonzero()[0]) > 0:
-        eps = np.percentile(M[M.nonzero()].ravel(), q=quantile)
+    #if len(M.nonzero()[0]) > 0:
+    #    eps = np.percentile(M[M.nonzero()].ravel(), q=quantile)
     min_samples = int(np.sqrt(M.shape[0]))
-    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric='precomputed')
+    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
     clusters = dbscan.fit_predict(M)
     
     return term, clusters
