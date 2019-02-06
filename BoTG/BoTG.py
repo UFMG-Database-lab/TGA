@@ -58,13 +58,14 @@ def process_term(params):
     docs_within = list(docs_within)
     M = np.eye(len(docs_within), dtype=np.float)
     qtd_total = int((len(docs_within)*len(docs_within))/2 - len(docs_within))
-    with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose, smoothing=0.) as pbar:
+    with tqdm(total=len(docs_within), position=2, desc="Building Distances", disable=not verbose, smoothing=0.8) as pbar:
         for i, doc_i in enumerate(docs_within):
             j = i+1
             M[i,j:] = M[j:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ]
-            pbar.update(len(docs_within)-j)
+            pbar.update()
+            #pbar.update(len(docs_within)-j-1)
     #M = NearestNeighbors(metric=metric).fit(M).radius_neighbors_graph(mode='distance')
-    eps = 0.1
+    eps = quantile
     #if len(M.nonzero()[0]) > 0:
     #    eps = np.percentile(M[M.nonzero()].ravel(), q=quantile)
     min_samples = int(np.sqrt(M.shape[0]))
@@ -75,7 +76,7 @@ def process_term(params):
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
-    n_jobs=None, max_iter=100, direction='both', metric='cosine', memory_strategy='soft', quantile=0.01, pooling='mean', assignment='hard'):
+    n_jobs=None, max_iter=100, direction='both', metric='cosine', memory_strategy='soft', quantile=0.1, pooling='mean', assignment='hard'):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
