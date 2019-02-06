@@ -17,6 +17,8 @@ import math
 
 import psutil, sys, operator
 
+import gc
+
 from .Utils import *
 from .dissimilatires import dissimilarity_node_in, dissimilarity_node_out, dissimilarity_node_both, dissimilarity_row
 from glob import glob
@@ -64,6 +66,7 @@ def process_term(params):
     min_samples = int(np.sqrt(M.shape[0]))
     dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
     clusters = dbscan.fit_predict(M)
+    
     return term, clusters
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
@@ -232,7 +235,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
             params = self._make_params_(terms_idx_chunk, verbose)
             with Pool(processes=self.n_jobs) as p:
-                for term, cluster in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                for j,(term, cluster) in enumerate(tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose)):
                     self._labels_map[term] = []
                     docs_within = terms_idx[term]
                     mapper = [ [] for i in range(max(cluster)+1) ]
@@ -245,6 +248,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                         self._labels.append( (term, (i, len(self._clusters))) )
                         self._labels_map[term].append(len(self._clusters))
                         self._clusters.append( selected_subgraph )
+                    gc.collect()
                     """
                     result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
                     self._labels_map[term] = []
