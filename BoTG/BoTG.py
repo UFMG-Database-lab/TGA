@@ -26,7 +26,7 @@ from tqdm import tqdm
 
 from collections.abc import Iterable
 import multiprocessing
-from multiprocessing import Pool
+from multiprocessing import Pool, Process
 #from .MeanShift._meanshift_ import build_clusters
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.metrics import pairwise_distances
@@ -40,6 +40,11 @@ import time
 
 VALID_FORMATS = ['doc', 'raw', 'filename']
 
+def garbage_collector():
+    while True:
+        gc.collect()
+        time.sleep(5)
+
 def K(x, sigma=100.):
     return np.exp( -(np.power(x,2.)/(2.*np.power(sigma,2.))) ) / (sigma*np.sqrt(2*np.pi))        
 
@@ -52,19 +57,18 @@ def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func, verbose = params
     docs_within = list(docs_within)
     M = np.eye(len(docs_within), dtype=np.float)
-    qtd_total = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
+    qtd_total = int((len(docs_within)*len(docs_within))/2 - len(docs_within))
     with tqdm(total=qtd_total, position=2, desc="Building Distances", disable=not verbose, smoothing=0.) as pbar:
         for i, doc_i in enumerate(docs_within):
             j = i+1
             M[i,j:] = M[j:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ]
             pbar.update(len(docs_within)-i)
-    nn = NearestNeighbors(metric=metric)
-    nn_data = nn.fit(M).radius_neighbors_graph(mode='distance')
+    M = NearestNeighbors(metric=metric).fit(M).radius_neighbors_graph(mode='distance')
     eps = 0.1
-    if len(nn_data.nonzero()[0]) > 0:
-        eps = np.percentile(nn_data[nn_data.nonzero()].ravel(), q=quantile)
+    if len(M.nonzero()[0]) > 0:
+        eps = np.percentile(M[M.nonzero()].ravel(), q=quantile)
     min_samples = int(np.sqrt(M.shape[0]))
-    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
+    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric='precomputed')
     clusters = dbscan.fit_predict(M)
     
     return term, clusters
@@ -218,6 +222,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._clusters = []
         self._labels = []
         self._labels_map = {}
+        garbage_process = Process(target=garbage_collector)
+        garbage_process.start()
 
         terms_idx_ = [ (term, list(docs_within)) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
@@ -248,7 +254,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                         self._labels.append( (term, (i, len(self._clusters))) )
                         self._labels_map[term].append(len(self._clusters))
                         self._clusters.append( selected_subgraph )
-                    gc.collect()
                     """
                     result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
                     self._labels_map[term] = []
@@ -261,6 +266,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                         # o conjunto dos ids armazenados em result['clusters'][id_cluster]
                         # para recuperar os respectivos documentos em docs_within
                     """
+        garbage_process.terminate()
                     #(_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
 
         #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
