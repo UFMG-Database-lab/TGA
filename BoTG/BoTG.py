@@ -303,7 +303,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 else:
                     chunks.append( (size_atual_item,[item]) )
         finished_chunks.extend( [ chunk for _,chunk in chunks ] )
-        #finished_chunks = list(reversed(finished_chunks))
+        finished_chunks = list(reversed(finished_chunks))
         list(map(random.shuffle,finished_chunks))
         return finished_chunks
     def _define_chunks_(self, array_to_chunk, verbose=False):
