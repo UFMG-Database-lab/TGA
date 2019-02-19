@@ -90,10 +90,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
         self.direction = direction
         if self.direction == 'out':
+            self._get_subgraph_ = self._get_subgraph_out_
             self.dissimilarity_func = dissimilarity_node_out
         elif self.direction == 'in':
+            self._get_subgraph_ = self._get_subgraph_in_
             self.dissimilarity_func = dissimilarity_node_in
         elif self.direction == 'both':
+            self._get_subgraph_ = self._get_subgraph_both_
             self.dissimilarity_func = dissimilarity_node_both
         
         self.memory_strategy = memory_strategy
@@ -116,7 +119,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if "save_dist" in fit_params and fit_params['save_dist']:
             self._save_distances_(docs, terms_idx, '../terms_matrix/', verbose=verbose)
         else:
-            self._new_build_clusters_(docs, terms_idx, verbose=verbose) # 6/79734 [17:00]
+            self._build_clusters_(docs, terms_idx, verbose=verbose) # 6/79734 [17:00]
             #self._build_clusters_(docs, terms_idx, verbose=verbose)      # 1/79734 [22:31]
 
         return self
@@ -219,7 +222,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                         M[i,j] = M[j,i] = 1.-self.dissimilarity_func(doc_i.G, doc_j.G, term)
                         pbar.update(1)
             np.savetxt("%s/%s.csv" % (path_to_save, term), M, delimiter=",")
-    def _new_build_clusters_(self, docs, terms_idx, verbose=False):
+    def _build_clusters_(self, docs, terms_idx, verbose=False):
         self._clusters = []
         self._labels = []
         self._labels_map = {}
@@ -242,19 +245,26 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
             params = self._make_params_(terms_idx_chunk, verbose)
             with Pool(processes=self.n_jobs) as p:
-                for j,(term, cluster) in enumerate(tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose)):
-                    self._labels_map[term] = []
+                for (term, cluster) in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                    labels_term_map = []
                     docs_within = terms_idx[term]
                     mapper = [ [] for i in range(max(cluster)+1) ]
                     list(map(lambda x: mapper[x[1]].append(docs_within[x[0]].G), [ (i,x) for (i,x) in enumerate(cluster) if x >=0 ]))
                     for i, doc_in_cluster in enumerate(mapper):
+                        if i == -1:
+                            continue
                         # map subgraphs
                         subgraphs = list(map(lambda x: self._get_subgraph_(x, term) , doc_in_cluster))
                         # reduce subgraphs
-                        selected_subgraph = [] # subgraph
+                        selected_subgraph = nx.DiGraph()
+                        for subgraph in subgraphs:
+                            selected_subgraph = self._join_graph_(selected_subgraph, subgraph)
+                        selected_subgraph = self.__norm_graph__(selected_subgraph)
                         self._labels.append( (term, (i, len(self._clusters))) )
-                        self._labels_map[term].append(len(self._clusters))
+                        labels_term_map.append(len(self._clusters))
                         self._clusters.append( selected_subgraph )
+                    if len(labels_term_map) > 0:
+                        self._labels_map[term] = labels_term_map
                     """
                     result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
                     self._labels_map[term] = []
@@ -325,39 +335,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #chunks = list(reversed(chunks))
         #list(map(random.shuffle,chunks))
         return chunks
-    def _define_chunks_soft_2_(self, array_to_chunk, verbose=False):
-        i = 0
-        j = len(array_to_chunk)-1
-        
-        bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
-        size_bins = sum(bins_count[1:])
-
-        chunks_aux = []
-        while i < j:
-            big = array_to_chunk[i]
-            size_big = len(big[1])^2
-            chunk = [big]
-            size_small = 0
-            while ((size_small+len(array_to_chunk[j][1])^2) <= size_big or len(chunk) < size_bins) and i != j:
-                small = array_to_chunk[j]
-                chunk.append(small)
-                size_small += len(small[1])^2
-                j -= 1
-            chunks_aux.append(chunk)
-            i += 1
-        chunks = [[] for _ in range(size_bins)]
-        rev_ = True
-        for i in range(len(chunks_aux)):
-            idx = i % len(chunks)
-            if idx == 0:
-                rev_ = not rev_
-            if rev_:
-                idx = len(chunks)-idx-1
-            chunks[idx].extend(chunks_aux[i])
-        #chunks = list(reversed(chunks))
-        #list(map(random.shuffle,chunks))
-        return chunks
-    def _get_subgraph_(self, G, term):
+    def _get_subgraph_out_(self, G, term):
         g = nx.DiGraph()
         g.add_edges_from( G.edges(term, data=True) )
         if len(g.nodes) == 0:
@@ -367,6 +345,60 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             for att in G.node[n]:
                 g.node[n][att] = G.node[n][att]
         return g
+    def _get_subgraph_in_(self, G, term):
+        g = nx.DiGraph()
+        g.add_edges_from( G.in_edges(term, data=True) )
+        if len(g.nodes) == 0:
+            # this term-node does not have any edge
+            g.add_node(term)
+        for n in g.nodes:
+            for att in G.node[n]:
+                g.node[n][att] = G.node[n][att]
+        return g
+    def _get_subgraph_both_(self, G, term):
+        g = nx.DiGraph()
+        g.add_edges_from( G.edges(term, data=True) )
+        g.add_edges_from( G.in_edges(term, data=True) )
+        if len(g.nodes) == 0:
+            # this term-node does not have any edge
+            g.add_node(term)
+        for n in g.nodes:
+            for att in G.node[n]:
+                g.node[n][att] = G.node[n][att]
+        return g
+    def _join_graph_(self, G, g):
+        G.add_edges_from( g.edges )
+
+        for (source,target,data) in g.edges(data=True):
+            for att,value in data.items():
+                if att not in G[source][target]:
+                    G[source][target][att] = 0.
+                G[source][target][att] += value
+
+        for n in g.nodes:
+            if n not in G:
+                G.add_node(n)
+            for att in g.node[n]:
+                if att not in G.node[n]:
+                    G.node[n][att] = 0.
+                G.node[n][att] += g.node[n][att]
+        return G
+    def __norm_graph__(self, G): # const-kernel
+        if not len(G.nodes):
+            maxWeight_vertex = 1.
+        else:
+            maxWeight_vertex = max([ v_attr['weight'] for _,v_attr in G.nodes(data=True) ])
+        for v, v_attr in G.nodes(data=True):
+            G.node[v]['weight'] = v_attr['weight'] / maxWeight_vertex
+        
+        if not len(G.edges):
+            maxWeight_edge = 1.
+        else:
+            maxWeight_edge = max([ e_attr['weight'] for _,_,e_attr in G.edges(data=True) ])
+        for s,t,e_attr in G.edges(data=True):
+            G[s][t]['weight'] = e_attr['weight'] / maxWeight_edge
+
+        return G
     def _get_documents_obj_(self, X, format, verbose=False):
         if format == 'doc':
             return X
