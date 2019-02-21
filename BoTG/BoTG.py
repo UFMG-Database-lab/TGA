@@ -241,10 +241,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     end_chars = ''
                 print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
-
-        for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
-            params = self._make_params_(terms_idx_chunk, verbose)
-            with Pool(processes=self.n_jobs) as p:
+        with Pool(processes=self.n_jobs) as p:
+            for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
+                params = self._make_params_(terms_idx_chunk, verbose)
                 for (term, cluster) in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                     labels_term_map = []
                     docs_within = terms_idx[term]
