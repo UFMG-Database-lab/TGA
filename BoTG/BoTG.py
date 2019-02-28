@@ -8,6 +8,8 @@ from segtok.tokenizer import web_tokenizer, split_contractions
 
 from .DataRepresentation import Document
 
+import concurrent.futures
+
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -58,12 +60,14 @@ def size_item(item, size_float):
 def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func, verbose = params
     docs_within = list(docs_within)
-    M = np.eye(len(docs_within), dtype=np.float)
+    M = np.zeros((len(docs_within), len(docs_within)), dtype=np.float)
     #qtd_total = int((len(docs_within)*len(docs_within))/2 - len(docs_within))
     with tqdm(total=len(docs_within), position=2, desc="Building Distances", disable=not verbose, smoothing=0.8) as pbar:
         for i, doc_i in enumerate(docs_within):
             j = i+1
-            M[i,j:] = M[j:,i] = [ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ]
+            values = np.array([ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ])
+            M[i,j:] = values
+            M[j:,i] = values
             pbar.update()
             #pbar.update(len(docs_within)-j-1)
     #M = NearestNeighbors(metric=metric).fit(M).radius_neighbors_graph(mode='distance')
@@ -92,12 +96,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.direction = direction
         if self.direction == 'out':
             self._get_subgraph_ = self._get_subgraph_out_
+            self._size_neighborhood_ = self._size_neighborhood_out_
             self.dissimilarity_func = dissimilarity_node_out
         elif self.direction == 'in':
             self._get_subgraph_ = self._get_subgraph_in_
+            self._size_neighborhood_ = self._size_neighborhood_in_
             self.dissimilarity_func = dissimilarity_node_in
         elif self.direction == 'both':
             self._get_subgraph_ = self._get_subgraph_both_
+            self._size_neighborhood_ = self._size_neighborhood_both_
             self.dissimilarity_func = dissimilarity_node_both
         
         self.memory_strategy = memory_strategy
@@ -242,10 +249,18 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     end_chars = ''
                 print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
-        with closing(Pool(processes=self.n_jobs)) as p:
+        #with closing(Pool(processes=self.n_jobs)) as p:
+        #with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=self.n_jobs) as executor:
             for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
                 params = self._make_params_(terms_idx_chunk, verbose)
-                for (term, cluster) in tqdm(p.imap_unordered(process_term, params, 100), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                #for (term, cluster) in tqdm(executor.map(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                #for (term, cluster) in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                future_to_terms = {executor.submit(process_term, param): param for param in params}
+                for future in tqdm(concurrent.futures.as_completed(future_to_terms), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                    (term, cluster) = future.result()
+                #for param in tqdm(params, smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                    #(term, cluster) = process_term(param)
                     labels_term_map = []
                     docs_within = terms_idx[term]
                     mapper = [ [] for i in range(max(cluster)+1) ]
@@ -267,8 +282,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     del labels_term_map
                     del mapper
                     del docs_within
+                gc.collect()
+                gc.collect(1)
+                gc.collect(2)
         garbage_process.terminate()
-        gc.collect()
 
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
@@ -307,7 +324,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return finished_chunks
     def _define_chunks_(self, array_to_chunk, verbose=False):
         array_to_chunk_2 = array_to_chunk
-        random.shuffle(array_to_chunk_2)
+        #random.shuffle(array_to_chunk_2)
         return [ array_to_chunk_2 ]
     def _define_chunks_soft_(self, array_to_chunk, verbose=False):
         bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
@@ -355,6 +372,12 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             for att in G.node[n]:
                 g.node[n][att] = G.node[n][att]
         return g
+    def _size_neighborhood_both_(self, term, G):
+        return len(G.edges(term)) + len(G.in_edges(term))
+    def _size_neighborhood_in_(self, term, G):
+        return len(G.in_edges(term))
+    def _size_neighborhood_out_(self, term, G):
+        return len(G.edges(term))
     def _join_graph_(self, G, g):
         G.add_edges_from( g.edges )
 
@@ -399,6 +422,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         terms_idx = {}
         for doc in tqdm(docs, desc="Building term index", disable=not verbose):
             for v_term in doc.G.nodes:
+                size_nei = self._size_neighborhood_(v_term, doc.G)
+                if not size_nei:
+                    continue
                 if v_term not in terms_idx:
                     terms_idx[v_term] = []
                 terms_idx[v_term].append( doc )
