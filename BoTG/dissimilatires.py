@@ -49,8 +49,11 @@ def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
 
     dist = abs(weightA-weightB) + len( values_A ^ values_B ) # values_A ^ values_B = XOR(values_A, values_B)
     
-    for term_2 in intersection_neigh:
-        dist += abs( neighborsGA[term_2]['weight'] - neighborsGB[term_2]['weight'] )
+    dist += sum( [ abs( neighborsGA[term_2]['weight'] - neighborsGB[term_2]['weight'] ) for term_2 in intersection_neigh ] )
+
+    #for term_2 in intersection_neigh:
+    #    dist += abs( neighborsGA[term_2]['weight'] - neighborsGB[term_2]['weight'] )
+    
     return dist / (size_union+1)
 
 def dissimilarity_row(A,B):

@@ -33,6 +33,8 @@ from sklearn.metrics import pairwise_distances
 from sklearn.neighbors import NearestNeighbors 
 from sklearn import cluster
 
+from contextlib import closing
+
 import random
 
 from joblib import Parallel, delayed
@@ -57,7 +59,7 @@ def process_term(params):
     term, docs_within, quantile, metric, dissimilarity_func, verbose = params
     docs_within = list(docs_within)
     M = np.eye(len(docs_within), dtype=np.float)
-    qtd_total = int((len(docs_within)*len(docs_within))/2 - len(docs_within))
+    #qtd_total = int((len(docs_within)*len(docs_within))/2 - len(docs_within))
     with tqdm(total=len(docs_within), position=2, desc="Building Distances", disable=not verbose, smoothing=0.8) as pbar:
         for i, doc_i in enumerate(docs_within):
             j = i+1
@@ -69,9 +71,8 @@ def process_term(params):
     #if len(M.nonzero()[0]) > 0:
     #    eps = np.percentile(M[M.nonzero()].ravel(), q=quantile)
     min_samples = int(np.sqrt(M.shape[0]))
-    dbscan = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric)
-    clusters = dbscan.fit_predict(M)
-    
+    clusters = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric).fit_predict(M)
+    del M
     return term, clusters
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
@@ -241,17 +242,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     end_chars = ''
                 print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
-        with Pool(processes=self.n_jobs) as p:
+        with closing(Pool(processes=self.n_jobs)) as p:
             for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
                 params = self._make_params_(terms_idx_chunk, verbose)
-                for (term, cluster) in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                for (term, cluster) in tqdm(p.imap_unordered(process_term, params, 100), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                     labels_term_map = []
                     docs_within = terms_idx[term]
                     mapper = [ [] for i in range(max(cluster)+1) ]
                     list(map(lambda x: mapper[x[1]].append(docs_within[x[0]].G), [ (i,x) for (i,x) in enumerate(cluster) if x >=0 ]))
                     for i, doc_in_cluster in enumerate(mapper):
-                        if i == -1:
-                            continue
                         # map subgraphs
                         subgraphs = list(map(lambda x: self._get_subgraph_(x, term) , doc_in_cluster))
                         # reduce subgraphs
@@ -262,24 +261,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                         self._labels.append( (term, (i, len(self._clusters))) )
                         labels_term_map.append(len(self._clusters))
                         self._clusters.append( selected_subgraph )
+                        del subgraphs
                     if len(labels_term_map) > 0:
                         self._labels_map[term] = labels_term_map
-                    """
-                    result = build_clusters(M, n_jobs=self.n_jobs, max_iter=self.max_iter, quantile=self.quantile, metric=self.metric, verbose=verbose)
-                    self._labels_map[term] = []
-                    for i, id_cluster in enumerate(result['clusters'].keys()):
-                        selected_subgraph = self._get_subgraph_(docs_within[id_cluster].G, term)
-                        self._labels.append( (term, (i, len(self._clusters))) )
-                        self._labels_map[term].append(len(self._clusters))
-                        self._clusters.append( selected_subgraph )
-                        # Se for construir uma representação sintética do cluster, usar
-                        # o conjunto dos ids armazenados em result['clusters'][id_cluster]
-                        # para recuperar os respectivos documentos em docs_within
-                    """
+                    del labels_term_map
+                    del mapper
+                    del docs_within
         garbage_process.terminate()
-                    #(_, cluster) = process_term_parallel( (term, docs, self.n_jobs, self.quantile, self.metric, dissimilarity_func, verbose) )
+        gc.collect()
 
-        #clusters = Parallel(n_jobs=self.n_jobs)(delayed(process_term)(term, docs, self.quantile, self.n_jobs, self.metric, dissimilarity_func) for (term, docs) in tqdm(terms_idx_, desc="Building clusters", position=1, disable=not verbose))
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
         aval -= 0.5*aval
