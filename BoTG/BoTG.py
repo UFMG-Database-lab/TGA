@@ -10,6 +10,8 @@ from .DataRepresentation import Document
 
 import concurrent.futures
 
+from multiprocessing.pool import ThreadPool
+
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -40,44 +42,9 @@ from contextlib import closing
 import random
 
 from joblib import Parallel, delayed
-import time
+
 
 VALID_FORMATS = ['doc', 'raw', 'filename']
-
-def garbage_collector():
-    while True:
-        gc.collect()
-        time.sleep(5)
-
-def K(x, sigma=100.):
-    return np.exp( -(np.power(x,2.)/(2.*np.power(sigma,2.))) ) / (sigma*np.sqrt(2*np.pi))        
-
-def size_item(item, size_float):
-    term, docs_within = item
-    #return len(docs_within)*len(docs_within)*size_float
-    return 8*(len(docs_within)*len(docs_within)*size_float + 2*sys.getsizeof(docs_within))
-
-def process_term(params):
-    term, docs_within, quantile, metric, dissimilarity_func, verbose = params
-    docs_within = list(docs_within)
-    M = np.zeros((len(docs_within), len(docs_within)), dtype=np.float)
-    #qtd_total = int((len(docs_within)*len(docs_within))/2 - len(docs_within))
-    with tqdm(total=len(docs_within), position=2, desc="Building Distances", disable=not verbose, smoothing=0.8) as pbar:
-        for i, doc_i in enumerate(docs_within):
-            j = i+1
-            values = np.array([ 1.-dissimilarity_func(doc_i.G, doc_j.G, term) for doc_j in docs_within[j:] ])
-            M[i,j:] = values
-            M[j:,i] = values
-            pbar.update()
-            #pbar.update(len(docs_within)-j-1)
-    #M = NearestNeighbors(metric=metric).fit(M).radius_neighbors_graph(mode='distance')
-    eps = quantile
-    #if len(M.nonzero()[0]) > 0:
-    #    eps = np.percentile(M[M.nonzero()].ravel(), q=quantile)
-    min_samples = int(np.sqrt(M.shape[0]))
-    clusters = cluster.DBSCAN(n_jobs=1, eps=eps, min_samples=min_samples, metric=metric).fit_predict(M)
-    del M
-    return term, clusters
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
@@ -249,39 +216,30 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     end_chars = ''
                 print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
-        #with closing(Pool(processes=self.n_jobs)) as p:
+        with ThreadPool(self.n_jobs) as executor:
+        #pool = Pool(processes=self.n_jobs)
+        #with closing(Pool(processes=self.n_jobs)) as executor:
         #with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=self.n_jobs) as executor:
+        #with concurrent.futures.ProcessPoolExecutor(max_workers=self.n_jobs) as executor:
             for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
+                #params = self._make_params2_(terms_idx_chunk, pool, verbose)
                 params = self._make_params_(terms_idx_chunk, verbose)
-                #for (term, cluster) in tqdm(executor.map(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                #for (term, cluster) in tqdm(p.imap_unordered(process_term, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                future_to_terms = {executor.submit(process_term, param): param for param in params}
-                for future in tqdm(concurrent.futures.as_completed(future_to_terms), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                    (term, cluster) = future.result()
+                
+                #for (term, clusters) in tqdm(executor.map(process_term_func, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                for (term, clusters) in tqdm(executor.imap_unordered(process_term_func, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                #future_to_terms = [executor.submit(process_term_func, param) for param in params]
+                #for future in tqdm(concurrent.futures.as_completed(future_to_terms), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                #    (term, clusters) = future.result()
+                #for (term, cluster) in tqdm(Parallel(n_jobs=self.n_jobs)(process_term(param) for param in params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                #for (term, cluster) in tqdm(Parallel(n_jobs=self.n_jobs)(process_term_func(param) for param in params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                 #for param in tqdm(params, smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                    #(term, cluster) = process_term(param)
-                    labels_term_map = []
-                    docs_within = terms_idx[term]
-                    mapper = [ [] for i in range(max(cluster)+1) ]
-                    list(map(lambda x: mapper[x[1]].append(docs_within[x[0]].G), [ (i,x) for (i,x) in enumerate(cluster) if x >=0 ]))
-                    for i, doc_in_cluster in enumerate(mapper):
-                        # map subgraphs
-                        subgraphs = list(map(lambda x: self._get_subgraph_(x, term) , doc_in_cluster))
-                        # reduce subgraphs
-                        selected_subgraph = nx.DiGraph()
-                        for subgraph in subgraphs:
-                            selected_subgraph = self._join_graph_(selected_subgraph, subgraph)
-                        selected_subgraph = self.__norm_graph__(selected_subgraph)
-                        self._labels.append( (term, (i, len(self._clusters))) )
-                        labels_term_map.append(len(self._clusters))
-                        self._clusters.append( selected_subgraph )
-                        del subgraphs
-                    if len(labels_term_map) > 0:
-                        self._labels_map[term] = labels_term_map
-                    del labels_term_map
-                    del mapper
-                    del docs_within
+                #    (term, clusters) = process_term(param)
+                    if not len(clusters):
+                        self._labels_map[term] = []
+                        for i, selected_subgraph in enumerate(clusters):
+                            self._labels.append( (term, (i, len(self._clusters))) )
+                            self._labels_map[term].append(len(self._clusters))
+                            self._clusters.append( selected_subgraph )
                 gc.collect()
                 gc.collect(1)
                 gc.collect(2)
@@ -323,12 +281,12 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         list(map(random.shuffle,finished_chunks))
         return finished_chunks
     def _define_chunks_(self, array_to_chunk, verbose=False):
-        array_to_chunk_2 = array_to_chunk
-        #random.shuffle(array_to_chunk_2)
+        #random.shuffle(array_to_chunk)
+        array_to_chunk_2 = list(reversed(array_to_chunk))
         return [ array_to_chunk_2 ]
     def _define_chunks_soft_(self, array_to_chunk, verbose=False):
         bins_count, _ = np.histogram([ len(item[1])^2 for item in array_to_chunk ], bins=10)
-        size_bins = int(sum(bins_count[1:]))
+        size_bins = int(sum(bins_count[9:]))
         chunks = [[] for _ in range(size_bins)]
         rev_ = True
         for i, item in enumerate(array_to_chunk):
@@ -378,39 +336,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return len(G.in_edges(term))
     def _size_neighborhood_out_(self, term, G):
         return len(G.edges(term))
-    def _join_graph_(self, G, g):
-        G.add_edges_from( g.edges )
-
-        for (source,target,data) in g.edges(data=True):
-            for att,value in data.items():
-                if att not in G[source][target]:
-                    G[source][target][att] = 0.
-                G[source][target][att] += value
-
-        for n in g.nodes:
-            if n not in G:
-                G.add_node(n)
-            for att in g.node[n]:
-                if att not in G.node[n]:
-                    G.node[n][att] = 0.
-                G.node[n][att] += g.node[n][att]
-        return G
-    def __norm_graph__(self, G): # const-kernel
-        if not len(G.nodes):
-            maxWeight_vertex = 1.
-        else:
-            maxWeight_vertex = max([ v_attr['weight'] for _,v_attr in G.nodes(data=True) ])
-        for v, v_attr in G.nodes(data=True):
-            G.node[v]['weight'] = v_attr['weight'] / maxWeight_vertex
-        
-        if not len(G.edges):
-            maxWeight_edge = 1.
-        else:
-            maxWeight_edge = max([ e_attr['weight'] for _,_,e_attr in G.edges(data=True) ])
-        for s,t,e_attr in G.edges(data=True):
-            G[s][t]['weight'] = e_attr['weight'] / maxWeight_edge
-
-        return G
     def _get_documents_obj_(self, X, format, verbose=False):
         if format == 'doc':
             return X
@@ -431,7 +356,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return terms_idx
     def _make_params_(self,terms_idx_chunk, verbose):
         for i, (term, docs) in enumerate(terms_idx_chunk):
-            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, i == 0 and verbose)
+            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, self._get_subgraph_, i == 0 and verbose)
+    def _make_params2_(self,terms_idx_chunk, pool, verbose):
+        for i, (term, docs) in enumerate(terms_idx_chunk):
+            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, self._get_subgraph_, pool, i == 0 and verbose)
     # Validations
     def _validate_format_(self, format_doc):
         _format = format_doc

@@ -26,7 +26,7 @@ required_args.add_argument('-d','--datasetdir', type=str, nargs='+', help='', re
 parser.add_argument('--silence', default=False, type=lambda x: (str(x).lower() == 'true'))
 
 
-parser.add_argument('-f','--nfolds', type=int, nargs='?', help='', default=10)
+parser.add_argument('-f','--nfolds', type=int, nargs='?', help='', default=5)
 
 parser.add_argument('-w','--window', type=int, nargs='+', help='', default=[2])
 parser.add_argument('-df','--min_df', type=int, nargs='+', help='', default=[2])
