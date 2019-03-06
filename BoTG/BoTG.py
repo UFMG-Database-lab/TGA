@@ -345,8 +345,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         spark_config = spark_config.setMaster("local[%d]" % cpu_count)
         spark_config = spark_config.set("spark.executor.memory", "%d" % memory)
         spark_config = spark_config.set("spark.driver.memory", "%d" % memory)
-        spark_config = spark_config.set("spark.executor.heartbeatInterval", "120") #
-        spark_config = spark_config.set("spark.network.timeout", "240")
+        spark_config = spark_config.set("spark.executor.heartbeatInterval", "1000s") #
+        spark_config = spark_config.set("spark.network.timeout", "10000s")
         return spark_config
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
