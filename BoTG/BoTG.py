@@ -181,7 +181,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         sc = SparkContext(conf=self.spark_config).getOrCreate()
         #ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
         #sc = ss.sparkContext
-        #sc.setLogLevel('INFO' if verbose else 'ERROR')
+        sc.setLogLevel('INFO' if verbose else 'ERROR')
         
         rdd_of_docs = sc.parallelize(list_of_docs)
         
@@ -342,9 +342,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         memory = psutil.virtual_memory().total
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
-        spark_config = spark_config.setMaster(f"local[{cpu_count}]")
-        spark_config = spark_config.set("spark.executor.memory", f"{memory}")
-        spark_config = spark_config.set("spark.driver.memory", f"{memory}")
+        spark_config = spark_config.setMaster("local[%d]" % cpu_count)
+        spark_config = spark_config.set("spark.executor.memory", "%d" % memory)
+        spark_config = spark_config.set("spark.driver.memory", "%d" % memory)
         return spark_config
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
