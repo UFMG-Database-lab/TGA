@@ -1,0 +1,145 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+BoTG	../BoTG/BoTG.py	/^class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure$/;"	kind:class	line:60
+BoTG.py	../BoTG/BoTG.py	1;"	kind:file	line:1
+Collection	../BoTG/collection.py	/^class Collection(object):$/;"	kind:class	line:1
+DataRepresentation.py	../BoTG/DataRepresentation.py	1;"	kind:file	line:1
+Document	../BoTG/DataRepresentation.py	/^class Document(object):$/;"	kind:class	line:31
+EXCLUDE	../BoTG/Utils.py	/^EXCLUDE = set(string.punctuation)$/;"	kind:variable	line:29
+K	../BoTG/DataRepresentation.py	/^def K(x, sigma=100.):$/;"	kind:function	line:28
+K	../BoTG/Utils.py	/^def K(x, sigma=100.):$/;"	kind:function	line:53
+STOPWORDS	../BoTG/Utils.py	/^STOPWORDS = {}$/;"	kind:variable	line:30
+Utils.py	../BoTG/Utils.py	1;"	kind:file	line:1
+VALID_FORMATS	../BoTG/BoTG.py	/^VALID_FORMATS = ['doc', 'raw', 'filename']$/;"	kind:variable	line:58
+X	../execute_dataset.py	/^                                X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)$/;"	kind:variable	line:84
+X	../execute_dataset.py	/^                                X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)$/;"	kind:variable	line:78
+__add_cooccur__	../BoTG/DataRepresentation.py	/^    def __add_cooccur__(self, left_term, right_term, idx_cooccur):$/;"	kind:member	line:94
+__assignment_hard__	../BoTG/collection.py	/^    def __assignment_hard__(self, doc):$/;"	kind:member	line:126
+__assignment_soft__	../BoTG/collection.py	/^    def __assignment_soft__(self, doc):$/;"	kind:member	line:134
+__build_graph__	../BoTG/DataRepresentation.py	/^    def __build_graph__(self):$/;"	kind:member	line:61
+__compute_diss_2__	../BoTG/dissimilatires.py	/^def __compute_diss_2__(neighborsGA, weightA, neighborsGB, weightB):$/;"	kind:function	line:31
+__compute_diss__	../BoTG/dissimilatires.py	/^def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):$/;"	kind:function	line:43
+__dedup_clusters__	../BoTG/MeanShift/_meanshift_.py	/^def __dedup_clusters__(X, nbrs, clusters, mapper_subgraph_cluster, bandwidth, max_iter=100, metric='cosine'):$/;"	kind:function	line:57
+__dissimilarity_node__	../BoTG/collection.py	/^    def __dissimilarity_node__(self, GA, GB, term):$/;"	kind:member	line:177
+__get_assignment__	../BoTG/collection.py	/^    def __get_assignment__(self, assignment_mode=None):$/;"	kind:member	line:145
+__get_kernel__	../BoTG/DataRepresentation.py	/^    def __get_kernel__(self, kernel):$/;"	kind:member	line:102
+__get_pooling__	../BoTG/collection.py	/^    def __get_pooling__(self, pooling_mode=None):$/;"	kind:member	line:164
+__getitem__	../BoTG/sym_matrix.py	/^    def __getitem__(self, index):$/;"	kind:member	line:209
+__getitem__	../BoTG/sym_matrix.py	/^    def __getitem__(self, index):$/;"	kind:member	line:327
+__getitem__	../BoTG/sym_matrix.py	/^    def __getitem__(self, index):$/;"	kind:member	line:89
+__init__	../BoTG/BoTG.py	/^    def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,$/;"	kind:member	line:61
+__init__	../BoTG/DataRepresentation.py	/^    def __init__(self, text, lan='en', w=1, kernel='norm'):$/;"	kind:member	line:32
+__init__	../BoTG/collection.py	/^    def __init__(self, docspath=None, minDF=2.,$/;"	kind:member	line:2
+__init__	../BoTG/sym_matrix.py	/^    def __init__(self, arg1, dtype=None):$/;"	kind:member	line:10
+__init__	../BoTG/sym_matrix.py	/^    def __init__(self, arg1, dtype=None):$/;"	kind:member	line:248
+__init__	../BoTG/sym_matrix.py	/^    def __init__(self, arg1, shape=None, dtype=None):$/;"	kind:member	line:128
+__kernel_const__	../BoTG/DataRepresentation.py	/^    def __kernel_const__(self, cooccurs):$/;"	kind:member	line:109
+__kernel_log__	../BoTG/DataRepresentation.py	/^    def __kernel_log__(self, cooccurs):$/;"	kind:member	line:111
+__mean_shift_single_seed__	../BoTG/MeanShift/_meanshift_.py	/^def __mean_shift_single_seed__(idx_seed, X, nbrs, max_iter, verbose=False):$/;"	kind:function	line:14
+__norm_graph__	../BoTG/DataRepresentation.py	/^    def __norm_graph__(self, kernel): # const-kernel$/;"	kind:member	line:80
+__pooling_max__	../BoTG/collection.py	/^    def __pooling_max__(self, doc):$/;"	kind:member	line:158
+__pooling_mean__	../BoTG/collection.py	/^    def __pooling_mean__(self, doc):$/;"	kind:member	line:155
+__pooling_sum__	../BoTG/collection.py	/^    def __pooling_sum__(self, doc):$/;"	kind:member	line:161
+_build_clusters_	../BoTG/BoTG.py	/^    def _build_clusters_(self, docs, terms_idx, verbose=False):$/;"	kind:member	line:264
+_build_clusters_pyspark_	../BoTG/BoTG.py	/^    def _build_clusters_pyspark_(self, list_of_docs, verbose=False):$/;"	kind:member	line:176
+_build_term_idx_	../BoTG/BoTG.py	/^    def _build_term_idx_(self, docs, verbose=False):$/;"	kind:member	line:416
+_build_term_representation_pyspark_	../BoTG/BoTG.py	/^    def _build_term_representation_pyspark_(get_subgraph):$/;"	kind:member	line:235
+_co_build_term_representation_pyspark_	../BoTG/BoTG.py	/^        def _co_build_term_representation_pyspark_(x):$/;"	kind:function	line:236
+_co_create_matrix_pyspark_	../BoTG/BoTG.py	/^        def _co_create_matrix_pyspark_(x):$/;"	kind:function	line:217
+_co_predict_clusterer_pyspark_	../BoTG/BoTG.py	/^        def _co_predict_clusterer_pyspark_(x):$/;"	kind:function	line:229
+_create_index_pyspark_	../BoTG/BoTG.py	/^    def _create_index_pyspark_(doc):$/;"	kind:member	line:213
+_create_matrix_pyspark_	../BoTG/BoTG.py	/^    def _create_matrix_pyspark_(diss_func):$/;"	kind:member	line:216
+_define_chunks_	../BoTG/BoTG.py	/^    def _define_chunks_(self, array_to_chunk, verbose=False):$/;"	kind:member	line:384
+_define_chunks_hard_	../BoTG/BoTG.py	/^    def _define_chunks_hard_(self, array_to_chunk, verbose=False):$/;"	kind:member	line:349
+_define_chunks_soft_	../BoTG/BoTG.py	/^    def _define_chunks_soft_(self, array_to_chunk, verbose=False):$/;"	kind:member	line:388
+_get_assignment_function_	../BoTG/BoTG.py	/^    def _get_assignment_function_(self, assignment):$/;"	kind:member	line:141
+_get_default_spark_config_	../BoTG/BoTG.py	/^    def _get_default_spark_config_(self):$/;"	kind:member	line:340
+_get_documents_obj_	../BoTG/BoTG.py	/^    def _get_documents_obj_(self, X, format, verbose=False):$/;"	kind:member	line:409
+_get_pooling_function_	../BoTG/BoTG.py	/^    def _get_pooling_function_(self, pooling):$/;"	kind:member	line:161
+_get_shape_	../BoTG/sym_matrix.py	/^    def _get_shape_(self, i,j):$/;"	kind:member	line:178
+_get_shape_	../BoTG/sym_matrix.py	/^    def _get_shape_(self, i,j):$/;"	kind:member	line:296
+_get_shape_	../BoTG/sym_matrix.py	/^    def _get_shape_(self, i,j):$/;"	kind:member	line:58
+_get_subgraph_both_	../BoTG/Utils.py	/^def _get_subgraph_both_( G, term):$/;"	kind:function	line:110
+_get_subgraph_in_	../BoTG/Utils.py	/^def _get_subgraph_in_( G, term):$/;"	kind:function	line:100
+_get_subgraph_out_	../BoTG/Utils.py	/^def _get_subgraph_out_( G, term):$/;"	kind:function	line:90
+_hard_assignment_	../BoTG/BoTG.py	/^    def _hard_assignment_(self, term, graph):$/;"	kind:member	line:118
+_join_graph_	../BoTG/Utils.py	/^def _join_graph_( G, g):$/;"	kind:function	line:56
+_load_document_	../BoTG/DataRepresentation.py	/^    def _load_document_(param):$/;"	kind:member	line:46
+_make_params2_	../BoTG/BoTG.py	/^    def _make_params2_(self,terms_idx_chunk, pool, verbose):$/;"	kind:member	line:430
+_make_params_	../BoTG/BoTG.py	/^    def _make_params_(self,terms_idx_chunk, verbose):$/;"	kind:member	line:427
+_max_pooling_	../BoTG/BoTG.py	/^    def _max_pooling_(self, X):$/;"	kind:member	line:157
+_mean_pooling_	../BoTG/BoTG.py	/^    def _mean_pooling_(self, X):$/;"	kind:member	line:155
+_meanshift_.py	../BoTG/MeanShift/_meanshift_.py	1;"	kind:file	line:1
+_norm_graph_	../BoTG/Utils.py	/^def _norm_graph_( G): # const-kernel$/;"	kind:function	line:73
+_param_to_index	../BoTG/sym_matrix.py	/^    def _param_to_index(self, i, j):$/;"	kind:member	line:137
+_param_to_index	../BoTG/sym_matrix.py	/^    def _param_to_index(self, i, j):$/;"	kind:member	line:17
+_param_to_index	../BoTG/sym_matrix.py	/^    def _param_to_index(self, i, j):$/;"	kind:member	line:255
+_predict_clusterer_pyspark_	../BoTG/BoTG.py	/^    def _predict_clusterer_pyspark_(quantile, metric):$/;"	kind:member	line:228
+_set_direction_	../BoTG/BoTG.py	/^    def _set_direction_(self, direction):$/;"	kind:member	line:433
+_size_neighborhood_both_	../BoTG/BoTG.py	/^    def _size_neighborhood_both_(self, term, G):$/;"	kind:member	line:403
+_size_neighborhood_in_	../BoTG/BoTG.py	/^    def _size_neighborhood_in_(self, term, G):$/;"	kind:member	line:405
+_size_neighborhood_out_	../BoTG/BoTG.py	/^    def _size_neighborhood_out_(self, term, G):$/;"	kind:member	line:407
+_soft_assignment_	../BoTG/BoTG.py	/^    def _soft_assignment_(self, term, graph):$/;"	kind:member	line:126
+_statistics_	../BoTG/BoTG.py	/^    def _statistics_(self, terms_idx):$/;"	kind:member	line:254
+_sum_pooling_	../BoTG/BoTG.py	/^    def _sum_pooling_(self, X):$/;"	kind:member	line:159
+_unorm_assignment_	../BoTG/BoTG.py	/^    def _unorm_assignment_(self, term, graph):$/;"	kind:member	line:134
+_validate_format_	../BoTG/BoTG.py	/^    def _validate_format_(self, format_doc):$/;"	kind:member	line:448
+add_doc	../BoTG/collection.py	/^    def add_doc(self, doc):$/;"	kind:member	line:27
+add_docs	../BoTG/collection.py	/^    def add_docs(self, docs):$/;"	kind:member	line:35
+args	../execute_dataset.py	/^args = parser.parse_args()$/;"	kind:variable	line:42
+assignment	../BoTG/collection.py	/^    def assignment(self, assignment_mode=None):$/;"	kind:member	line:190
+botg	../execute_dataset.py	/^                        botg = BoTG(metric=m, min_df=df)$/;"	kind:variable	line:69
+build_clusters	../BoTG/MeanShift/_meanshift_.py	/^def build_clusters(X, n_jobs=8, max_iter=100, metric='cosine', quantile=0.1, verbose=False):$/;"	kind:function	line:35
+build_matrix	../BoTG/collection.py	/^    def build_matrix(self):$/;"	kind:member	line:80
+build_matrix_new	../BoTG/collection.py	/^    def build_matrix_new(self):$/;"	kind:member	line:49
+build_vocabulary	../BoTG/collection.py	/^    def build_vocabulary(self):$/;"	kind:member	line:114
+collection.py	../BoTG/collection.py	1;"	kind:file	line:1
+dissimilarity_node_both	../BoTG/dissimilatires.py	/^def dissimilarity_node_both(GA, GB, term):$/;"	kind:function	line:17
+dissimilarity_node_in	../BoTG/dissimilatires.py	/^def dissimilarity_node_in(GA, GB, term):$/;"	kind:function	line:10
+dissimilarity_node_out	../BoTG/dissimilatires.py	/^def dissimilarity_node_out(GA, GB, term):$/;"	kind:function	line:3
+dissimilarity_row	../BoTG/dissimilatires.py	/^def dissimilarity_row(A,B):$/;"	kind:function	line:59
+dissimilatires.py	../BoTG/dissimilatires.py	1;"	kind:file	line:1
+dname	../execute_dataset.py	/^        dname = path.basename(path.dirname(path.join(d,'docs')))$/;"	kind:variable	line:52
+doc_names	../execute_dataset.py	/^        doc_names = list(map(path.basename, doc_paths))$/;"	kind:variable	line:54
+doc_paths	../execute_dataset.py	/^        doc_paths = sorted(glob(path.join(d,'docs','*')))$/;"	kind:variable	line:53
+docs	../execute_dataset.py	/^            docs = np.array(Document.load_path(doc_paths, w=w, verbose=not args.silence))$/;"	kind:variable	line:65
+estimate_bandwidth	../BoTG/MeanShift/_meanshift_.py	/^def estimate_bandwidth(X, n_jobs, metric='cosine', quantile=0.1, verbose=False):$/;"	kind:function	line:92
+estimate_seed	../BoTG/MeanShift/_meanshift_.py	/^def estimate_seed(X):$/;"	kind:function	line:90
+execute_dataset.py	../execute_dataset.py	1;"	kind:file	line:1
+filename_test	../execute_dataset.py	/^                                filename_test = "test%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)$/;"	kind:variable	line:82
+filename_train	../execute_dataset.py	/^                                filename_train = "train%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)$/;"	kind:variable	line:76
+fit	../BoTG/BoTG.py	/^    def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):$/;"	kind:member	line:85
+garbage_collector	../BoTG/Utils.py	/^def garbage_collector():$/;"	kind:function	line:48
+get_lemma	../BoTG/Utils.py	/^def get_lemma(lan):$/;"	kind:function	line:45
+get_stem	../BoTG/Utils.py	/^def get_stem(lan):$/;"	kind:function	line:42
+get_stopwords	../BoTG/Utils.py	/^def get_stopwords(lang):$/;"	kind:function	line:32
+lemma	../BoTG/Utils.py	/^lemma = WordNetLemmatizer()$/;"	kind:variable	line:26
+load_document	../BoTG/DataRepresentation.py	/^    def load_document(filepath, **kwargs):$/;"	kind:member	line:41
+load_labels	../execute_dataset.py	/^def load_labels(path_dataset):$/;"	kind:function	line:13
+load_path	../BoTG/DataRepresentation.py	/^    def load_path(filepattern, n_jobs=multiprocessing.cpu_count(), verbose=False, **kwargs):$/;"	kind:member	line:49
+load_path	../BoTG/collection.py	/^    def load_path(self, docspath, **kwargs):$/;"	kind:member	line:37
+load_stopword_list	../BoTG/Utils.py	/^def load_stopword_list(lang):$/;"	kind:function	line:37
+parser	../execute_dataset.py	/^parser = argparse.ArgumentParser()$/;"	kind:variable	line:20
+pooling	../BoTG/collection.py	/^    def pooling(self, pooling_mode=None):$/;"	kind:member	line:196
+process_chunk	../BoTG/BoTG.py	/^def process_chunk(params):$/;"	kind:function	line:52
+process_collection	../BoTG/collection.py	/^    def process_collection(self, pooling_mode=None, assignment_mode=None):$/;"	kind:member	line:202
+process_term	../BoTG/Utils.py	/^def process_term(params):$/;"	kind:function	line:147
+process_term_func	../BoTG/Utils.py	/^def process_term_func(params):$/;"	kind:function	line:129
+process_term_func2	../BoTG/Utils.py	/^def process_term_func2(params):$/;"	kind:function	line:138
+process_term_thread	../BoTG/Utils.py	/^def process_term_thread(params, send_end):$/;"	kind:function	line:144
+required_args	../execute_dataset.py	/^required_args = parser.add_argument_group('required arguments')$/;"	kind:variable	line:22
+scsr_matrix	../BoTG/sym_matrix.py	/^class scsr_matrix(csr_matrix):$/;"	kind:class	line:127
+sdok_matrix	../BoTG/sym_matrix.py	/^class sdok_matrix(dok_matrix):$/;"	kind:class	line:247
+size_item	../BoTG/Utils.py	/^def size_item(item, size_float):$/;"	kind:function	line:124
+skf	../execute_dataset.py	/^        skf = StratifiedKFold(n_splits=args.nfolds)$/;"	kind:variable	line:62
+slil_matrix	../BoTG/sym_matrix.py	/^class slil_matrix(lil_matrix):$/;"	kind:class	line:9
+stem	../BoTG/Utils.py	/^stem  = PorterStemmer()$/;"	kind:variable	line:27
+swap	../BoTG/sym_matrix.py	/^def swap(s1, s2):$/;"	kind:function	line:7
+sym_matrix.py	../BoTG/sym_matrix.py	1;"	kind:file	line:1
+transform	../BoTG/BoTG.py	/^    def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):$/;"	kind:member	line:99
+y	../execute_dataset.py	/^        y = LabelEncoder().fit_transform(y[:,1])$/;"	kind:variable	line:61
+y	../execute_dataset.py	/^        y = load_labels(d)$/;"	kind:variable	line:55

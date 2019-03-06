@@ -177,25 +177,25 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._clusters = []
         self._labels = []
         self._labels_map = {}
-        print("#1")
+        
         sc = SparkContext(conf=self.spark_config).getOrCreate()
         #ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
         #sc = ss.sparkContext
         #sc.setLogLevel('INFO' if verbose else 'ERROR')
-        print("#2")
+        
         rdd_of_docs = sc.parallelize(list_of_docs)
-        print("#3")
+        
         # Create index of terms
         index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_ ).groupByKey().mapValues(list)
-        print("#4")
+        
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile, self.metric) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._build_term_representation_pyspark_(self._get_subgraph_) )
-        print("#5")
+        
         # Run query
         result_clusters = rdd_of_matrix.collect()
-        print("#6")
+        
         for (term, clusters) in result_clusters:
             if len(clusters) > 0:
                 self._labels_map[term] = []
