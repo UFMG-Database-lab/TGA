@@ -181,9 +181,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         sc = SparkContext(conf=self.spark_config).getOrCreate()
         #ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
         #sc = ss.sparkContext
-        sc.setLogLevel('INFO' if verbose else 'ERROR')
+        #sc.setLogLevel('INFO' if verbose else 'ERROR')
         
-        rdd_of_docs = sc.parallelize(list_of_docs)
+        rdd_of_docs = sc.parallelize(list_of_docs).repartition(multiprocessing.cpu_count()*10)
         
         # Create index of terms
         index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_ ).groupByKey().mapValues(list)
@@ -345,6 +345,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         spark_config = spark_config.setMaster("local[%d]" % cpu_count)
         spark_config = spark_config.set("spark.executor.memory", "%d" % memory)
         spark_config = spark_config.set("spark.driver.memory", "%d" % memory)
+        spark_config = spark_config.set("spark.executor.heartbeatInterval", "120") #
+        spark_config = spark_config.set("spark.network.timeout", "240")
         return spark_config
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
