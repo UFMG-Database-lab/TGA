@@ -87,6 +87,40 @@ def _norm_graph_( G): # const-kernel
 
     return G
 
+def _get_subgraph_out_( G, term):
+        g = nx.DiGraph()
+        g.add_edges_from( G.edges(term, data=True) )
+        if len(g.nodes) == 0:
+            # this term-node does not have any edge
+            g.add_node(term)
+        for n in g.nodes:
+            for att in G.node[n]:
+                g.node[n][att] = G.node[n][att]
+        return g
+def _get_subgraph_in_( G, term):
+    g = nx.DiGraph()
+    g.add_edges_from( G.in_edges(term, data=True) )
+    if len(g.nodes) == 0:
+        # this term-node does not have any edge
+        g.add_node(term)
+    for n in g.nodes:
+        for att in G.node[n]:
+            g.node[n][att] = G.node[n][att]
+    return g
+def _get_subgraph_both_( G, term):
+    g = nx.DiGraph()
+    g.add_edges_from( G.edges(term, data=True) )
+    g.add_edges_from( G.in_edges(term, data=True) )
+    if len(g.nodes) == 0:
+        # this term-node does not have any edge
+        g.add_node(term)
+    for n in g.nodes:
+        for att in G.node[n]:
+            g.node[n][att] = G.node[n][att]
+    return g
+    
+
+
 def size_item(item, size_float):
     term, docs_within = item
     #return len(docs_within)*len(docs_within)*size_float

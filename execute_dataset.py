@@ -66,7 +66,8 @@ if __name__ == '__main__':
             for df in args.min_df:
                 for m in args.metric:
                     for f, (train_index, test_index) in enumerate(skf.split(docs, y)):
-                        botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
+                        botg = BoTG(metric=m, min_df=df)
+                        #botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
                         print("fold%d_%s_w%d_df%d_m-%s" % (f, dname,w,df,m))
                         docs_train, y_train = docs[train_index], y[train_index]
                         botg.fit(docs_train, verbose=not args.silence)

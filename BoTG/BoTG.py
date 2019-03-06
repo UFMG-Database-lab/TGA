@@ -6,11 +6,16 @@ Created on Mon Nov 19 11:38:02 2018
 from segtok.segmenter import split_multi
 from segtok.tokenizer import web_tokenizer, split_contractions
 
+from pyspark import SparkContext, SparkConf
+from pyspark.sql import SparkSession
+
 from .DataRepresentation import Document
 
 import concurrent.futures
 
-from multiprocessing.pool import ThreadPool
+#from multiprocessing.pool import ThreadPool
+from multiprocessing.dummy import Pool as ThreadPool
+
 
 import networkx as nx
 import numpy as np
@@ -24,6 +29,7 @@ import psutil, sys, operator
 import gc
 
 from .Utils import *
+from .Utils import process_term, garbage_collector, _norm_graph_, _join_graph_, _get_subgraph_both_, _get_subgraph_in_, _get_subgraph_out_
 from .dissimilatires import dissimilarity_node_in, dissimilarity_node_out, dissimilarity_node_both, dissimilarity_row
 from glob import glob
 from tqdm import tqdm
@@ -43,37 +49,30 @@ import random
 
 from joblib import Parallel, delayed
 
+def process_chunk(params):
+    chunk, params_func, verbose = params
+    with Pool(processes=1) as executor:
+        for (term, clusters) in tqdm(executor.imap_unordered(process_term, params_func(chunk, verbose)), smoothing=0., total=len(chunk), position=1, desc="Building Clusters", disable=not verbose):
+            yield (term, clusters)
 
 VALID_FORMATS = ['doc', 'raw', 'filename']
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
-    n_jobs=None, max_iter=100, direction='both', metric='cosine', memory_strategy='soft', quantile=0.1, pooling='mean', assignment='hard'):
+    direction='both', metric='cosine', quantile=0.1, pooling='mean', assignment='hard', spark_config=None):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
         self.min_df = min_df
-        self.max_iter = max_iter
         self.metric = metric
         self.quantile = quantile
         self.pooling = pooling
         self.assignment = assignment
-        self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
+        self.spark_config = spark_config if spark_config is not None else self._get_default_spark_config_()
+        #self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
-        self.direction = direction
-        if self.direction == 'out':
-            self._get_subgraph_ = self._get_subgraph_out_
-            self._size_neighborhood_ = self._size_neighborhood_out_
-            self.dissimilarity_func = dissimilarity_node_out
-        elif self.direction == 'in':
-            self._get_subgraph_ = self._get_subgraph_in_
-            self._size_neighborhood_ = self._size_neighborhood_in_
-            self.dissimilarity_func = dissimilarity_node_in
-        elif self.direction == 'both':
-            self._get_subgraph_ = self._get_subgraph_both_
-            self._size_neighborhood_ = self._size_neighborhood_both_
-            self.dissimilarity_func = dissimilarity_node_both
-        
+        self._set_direction_(direction)
+        """
         self.memory_strategy = memory_strategy
         if self.memory_strategy == 'norm':
             self._chunk_strategy = self._define_chunks_
@@ -81,6 +80,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             self._chunk_strategy = self._define_chunks_hard_
         elif self.memory_strategy == 'soft':
             self._chunk_strategy = self._define_chunks_soft_
+        """
 
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
@@ -90,12 +90,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             self.assignment = fit_params['assignment']
         
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
-        terms_idx = self._build_term_idx_(docs, verbose=verbose)
-        if "save_dist" in fit_params and fit_params['save_dist']:
-            self._save_distances_(docs, terms_idx, '../terms_matrix/', verbose=verbose)
-        else:
-            self._build_clusters_(docs, terms_idx, verbose=verbose) # 6/79734 [17:00]
-            #self._build_clusters_(docs, terms_idx, verbose=verbose)      # 1/79734 [22:31]
+
+        self._build_clusters_pyspark_(docs, verbose=verbose)
+        #terms_idx = self._build_term_idx_(docs, verbose=verbose)
+        #self._build_clusters_(docs, terms_idx, verbose=verbose)
 
         return self
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
@@ -174,6 +172,85 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         raise ValueError("%s pooling does not available." % pooling) 
     
     # Algorithm methods
+    # PySpark methods
+    def _build_clusters_pyspark_(self, list_of_docs, verbose=False):
+        self._clusters = []
+        self._labels = []
+        self._labels_map = {}
+        print("#1")
+        sc = SparkContext(conf=self.spark_config).getOrCreate()
+        #ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
+        #sc = ss.sparkContext
+        #sc.setLogLevel('INFO' if verbose else 'ERROR')
+        print("#2")
+        rdd_of_docs = sc.parallelize(list_of_docs)
+        print("#3")
+        # Create index of terms
+        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_ ).groupByKey().mapValues(list)
+        print("#4")
+        # Create matrix of co-occurrence, predict clusters and build term representations
+        rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
+        rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile, self.metric) )
+        rdd_of_matrix = rdd_of_matrix.map( BoTG._build_term_representation_pyspark_(self._get_subgraph_) )
+        print("#5")
+        # Run query
+        result_clusters = rdd_of_matrix.collect()
+        print("#6")
+        for (term, clusters) in result_clusters:
+            if len(clusters) > 0:
+                self._labels_map[term] = []
+                for i, selected_subgraph in enumerate(clusters):
+                    self._labels.append( (term, (i, len(self._clusters))) )
+                    self._labels_map[term].append(len(self._clusters))
+                    self._clusters.append( selected_subgraph )
+
+        sc.stop()
+        #ss.stop()
+        #ss.stop()
+        #del sc
+    # try https://stackoverflow.com/questions/32505426/how-to-process-rdds-using-a-python-class
+    @staticmethod
+    def _create_index_pyspark_(doc):
+        return [(node, doc.G) for node in doc.G.nodes]
+    @staticmethod
+    def _create_matrix_pyspark_(diss_func):
+        def _co_create_matrix_pyspark_(x):
+            (term, docs_within) = x
+            M = np.zeros((len(docs_within), len(docs_within)), dtype=np.float)
+            for i, graph_i in enumerate(docs_within):
+                j = i+1
+                values = np.array([ 1.-diss_func(graph_i, graph_j, term) for graph_j in docs_within[j:] ])
+                M[i,j:] = values
+                M[j:,i] = values
+            return (term, M, docs_within)
+        return _co_create_matrix_pyspark_
+    @staticmethod
+    def _predict_clusterer_pyspark_(quantile, metric):
+        def _co_predict_clusterer_pyspark_(x):
+            term, M, docs_within = x
+            clusters = cluster.DBSCAN(n_jobs=1, eps=quantile, min_samples=int(np.sqrt(M.shape[0])), metric=metric).fit_predict(M) 
+            return (term, clusters, docs_within)
+        return _co_predict_clusterer_pyspark_
+    @staticmethod
+    def _build_term_representation_pyspark_(get_subgraph):
+        def _co_build_term_representation_pyspark_(x):
+            (term, clusters, docs_within) = x
+            _clusters = []
+            mapper = [ [] for i in range(max(clusters)+1) ]
+            list(map(lambda x: mapper[x[1]].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
+            for doc_in_cluster in mapper:
+                # map subgraphs
+                subgraphs = list(map(lambda x: get_subgraph(x, term) , doc_in_cluster))
+                # reduce subgraphs
+                selected_subgraph = nx.DiGraph()
+                for subgraph in subgraphs:
+                    selected_subgraph = _join_graph_(selected_subgraph, subgraph)
+                selected_subgraph = _norm_graph_(selected_subgraph)
+                _clusters.append( selected_subgraph )
+            return (term, _clusters)
+        return _co_build_term_representation_pyspark_
+    
+    # General Methods
     def _statistics_(self, terms_idx):
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx if len(docs_within) >= self.min_df ]
         sizes = []
@@ -184,19 +261,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for i in range(len(bins)-1):
             if bins_count[i] > 0:
                 print("   [%d;%d[ = %d" % (round(bins[i],0), round(bins[i+1],0), bins_count[i]))
-    def _save_distances_(self, docs, terms_idx, path_to_save, verbose=True):
-        terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
-        terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
-        for term, docs_within in tqdm(terms_idx_, desc="Building clusters", position=0, disable=not verbose):
-            docs_within = list(docs_within)
-            M = np.eye(len(docs_within), dtype=np.float)
-            total_iters = int((len(docs_within)*len(docs_within)-len(docs_within))/2)
-            with tqdm(total=total_iters, desc="Building distances", position=1, disable=not verbose) as pbar:
-                for i, doc_i in enumerate(docs_within):
-                    for j, doc_j in enumerate(docs_within[:i]):
-                        M[i,j] = M[j,i] = 1.-self.dissimilarity_func(doc_i.G, doc_j.G, term)
-                        pbar.update(1)
-            np.savetxt("%s/%s.csv" % (path_to_save, term), M, delimiter=",")
     def _build_clusters_(self, docs, terms_idx, verbose=False):
         self._clusters = []
         self._labels = []
@@ -206,7 +270,24 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
         terms_idx_ = [ (term, list(docs_within)) for (term, docs_within) in terms_idx.items() if len(docs_within) >= self.min_df ]
         terms_idx_ = sorted(terms_idx_, key=lambda x: len(x[1]), reverse=True)
-        
+
+        #with ThreadPool(processes=self.n_jobs) as executor:
+        sc = SparkContext('local', 'pyspark tutorial') 
+        df = pd.DataFrame(list(self._make_params_(terms_idx_, verbose)))
+        params = sc.parallelize(df)
+
+        print(params)
+
+        for (term, clusters) in params.map(process_term).collect():
+            if len(clusters) > 0:
+                self._labels_map[term] = []
+                for i, selected_subgraph in enumerate(clusters):
+                    self._labels.append( (term, (i, len(self._clusters))) )
+                    self._labels_map[term].append(len(self._clusters))
+                    self._clusters.append( selected_subgraph )
+        #with Pool(processes=self.n_jobs) as executor:
+        #    for (term, clusters) in tqdm(executor.imap_unordered(process_term, params), total=len(terms_idx_), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):     
+        """
         chunks = list(self._chunk_strategy(terms_idx_, verbose=verbose))
         if verbose:
             print("Chunked process:")
@@ -216,17 +297,30 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                     end_chars = ''
                 print(" iter=%d with %d term" % (i, len(terms_idx_chunk)), end=end_chars)
                 self._statistics_(terms_idx_chunk)
-        with ThreadPool(self.n_jobs) as executor:
+                
+        #with ThreadPool(processes=self.n_jobs) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
+            #params = self._make_params_(terms_idx_chunk, verbose)
+            for to_unpack in tqdm(executor.map(process_chunk, [ (chunk, self._make_params_, verbose) for chunk in chunks ]), total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
+                for (term, clusters) in to_unpack:
+                    if not len(clusters):
+                        self._labels_map[term] = []
+                        for i, selected_subgraph in enumerate(clusters):
+                            self._labels.append( (term, (i, len(self._clusters))) )
+                            self._labels_map[term].append(len(self._clusters))
+                            self._clusters.append( selected_subgraph )
+        """
+        garbage_process.terminate()
         #pool = Pool(processes=self.n_jobs)
         #with closing(Pool(processes=self.n_jobs)) as executor:
         #with concurrent.futures.ThreadPoolExecutor(max_workers=self.n_jobs) as executor:
         #with concurrent.futures.ProcessPoolExecutor(max_workers=self.n_jobs) as executor:
-            for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
+            #for terms_idx_chunk in tqdm(chunks, total=len(chunks), position=0, desc="Running chunks", disable=not verbose, smoothing=0.):
                 #params = self._make_params2_(terms_idx_chunk, pool, verbose)
-                params = self._make_params_(terms_idx_chunk, verbose)
+                
                 
                 #for (term, clusters) in tqdm(executor.map(process_term_func, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
-                for (term, clusters) in tqdm(executor.imap_unordered(process_term_func, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
+                #for (term, clusters) in tqdm(executor.imap_unordered(process_term_func, params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                 #future_to_terms = [executor.submit(process_term_func, param) for param in params]
                 #for future in tqdm(concurrent.futures.as_completed(future_to_terms), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                 #    (term, clusters) = future.result()
@@ -234,17 +328,24 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 #for (term, cluster) in tqdm(Parallel(n_jobs=self.n_jobs)(process_term_func(param) for param in params), smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                 #for param in tqdm(params, smoothing=0., total=len(terms_idx_chunk), position=1, desc="Building Clusters", disable=not verbose):
                 #    (term, clusters) = process_term(param)
-                    if not len(clusters):
-                        self._labels_map[term] = []
-                        for i, selected_subgraph in enumerate(clusters):
-                            self._labels.append( (term, (i, len(self._clusters))) )
-                            self._labels_map[term].append(len(self._clusters))
-                            self._clusters.append( selected_subgraph )
-                gc.collect()
-                gc.collect(1)
-                gc.collect(2)
-        garbage_process.terminate()
-
+                    #if not len(clusters):
+                        #self._labels_map[term] = []
+                        #for i, selected_subgraph in enumerate(clusters):
+                            #self._labels.append( (term, (i, len(self._clusters))) )
+                            #self._labels_map[term].append(len(self._clusters))
+                            #self._clusters.append( selected_subgraph )
+                #gc.collect()
+                #gc.collect(1)
+                #gc.collect(2)
+    def _get_default_spark_config_(self):
+        cpu_count = multiprocessing.cpu_count()
+        memory = psutil.virtual_memory().total
+        spark_config = SparkConf()
+        spark_config = spark_config.setAppName("BoTG_pySpark")
+        spark_config = spark_config.setMaster(f"local[{cpu_count}]")
+        spark_config = spark_config.set("spark.executor.memory", f"{memory}")
+        spark_config = spark_config.set("spark.driver.memory", f"{memory}")
+        return spark_config
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
         aval -= 0.5*aval
@@ -299,37 +400,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #chunks = list(reversed(chunks))
         #list(map(random.shuffle,chunks))
         return chunks
-    def _get_subgraph_out_(self, G, term):
-        g = nx.DiGraph()
-        g.add_edges_from( G.edges(term, data=True) )
-        if len(g.nodes) == 0:
-            # this term-node does not have any edge
-            g.add_node(term)
-        for n in g.nodes:
-            for att in G.node[n]:
-                g.node[n][att] = G.node[n][att]
-        return g
-    def _get_subgraph_in_(self, G, term):
-        g = nx.DiGraph()
-        g.add_edges_from( G.in_edges(term, data=True) )
-        if len(g.nodes) == 0:
-            # this term-node does not have any edge
-            g.add_node(term)
-        for n in g.nodes:
-            for att in G.node[n]:
-                g.node[n][att] = G.node[n][att]
-        return g
-    def _get_subgraph_both_(self, G, term):
-        g = nx.DiGraph()
-        g.add_edges_from( G.edges(term, data=True) )
-        g.add_edges_from( G.in_edges(term, data=True) )
-        if len(g.nodes) == 0:
-            # this term-node does not have any edge
-            g.add_node(term)
-        for n in g.nodes:
-            for att in G.node[n]:
-                g.node[n][att] = G.node[n][att]
-        return g
     def _size_neighborhood_both_(self, term, G):
         return len(G.edges(term)) + len(G.in_edges(term))
     def _size_neighborhood_in_(self, term, G):
@@ -356,10 +426,24 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return terms_idx
     def _make_params_(self,terms_idx_chunk, verbose):
         for i, (term, docs) in enumerate(terms_idx_chunk):
-            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, self._get_subgraph_, i == 0 and verbose)
+            yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, self._get_subgraph_, verbose)
     def _make_params2_(self,terms_idx_chunk, pool, verbose):
         for i, (term, docs) in enumerate(terms_idx_chunk):
             yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, self._get_subgraph_, pool, i == 0 and verbose)
+    def _set_direction_(self, direction):
+        self.direction = direction
+        if self.direction == 'out':
+            self._get_subgraph_ = _get_subgraph_out_
+            self._size_neighborhood_ = self._size_neighborhood_out_
+            self.dissimilarity_func = dissimilarity_node_out
+        elif self.direction == 'in':
+            self._get_subgraph_ = _get_subgraph_in_
+            self._size_neighborhood_ = self._size_neighborhood_in_
+            self.dissimilarity_func = dissimilarity_node_in
+        elif self.direction == 'both':
+            self._get_subgraph_ = _get_subgraph_both_
+            self._size_neighborhood_ = self._size_neighborhood_both_
+            self.dissimilarity_func = dissimilarity_node_both
     # Validations
     def _validate_format_(self, format_doc):
         _format = format_doc
