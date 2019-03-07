@@ -101,12 +101,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         _assignment_ = self._get_assignment_function_(assignment)
         _pooling_ = self._get_pooling_function_(pooling)
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
-        X_result = []
-        for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
-            terms_assignments = []
-            for term in tqdm(doc.G.nodes, desc="Building terms", total=len(doc.G.nodes), position=1, disable=not verbose, smoothing=0.):
-                terms_assignments.append( _assignment_(term, doc.G) )
-            X_result.append( _pooling_(np.array(terms_assignments)) )
+        X_result = np.array([ _pooling_(terms_assignments) for terms_assignments in [ np.array([ _assignment_(term, doc.G) for term in doc.G.nodes ]) for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.) ] ])        
+        #for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
+        #    terms_assignments = np.array([ _assignment_(term, doc.G) for term in doc.G.nodes ])
+        #    X_result.append( _pooling_(terms_assignments) )
         return np.array(X_result)
     
     # private methods
@@ -193,7 +191,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile, self.metric) )
-        rdd_of_matrix = rdd_of_matrix.map( BoTG._build_term_representation_pyspark_(self._get_subgraph_) )
+        rdd_of_matrix = rdd_of_matrix.map( BoTG._build_term_representation_pyspark_ )
+        rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x[1]) > 0 )
 
         rdd_of_matrix.persist(StorageLevel.MEMORY_AND_DISK_SER)
         
@@ -201,12 +200,11 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         result_clusters = rdd_of_matrix.collect()
         
         for (term, clusters) in result_clusters:
-            if len(clusters) > 0:
-                self._labels_map[term] = []
-                for i, selected_subgraph in enumerate(clusters):
-                    self._labels.append( (term, (i, len(self._clusters))) )
-                    self._labels_map[term].append(len(self._clusters))
-                    self._clusters.append( selected_subgraph )
+            self._labels_map[term] = []
+            for i, selected_subgraph in enumerate(clusters):
+                self._labels.append( (term, (i, len(self._clusters))) )
+                self._labels_map[term].append(len(self._clusters))
+                self._clusters.append( selected_subgraph )
 
         sc.stop()
         #ss.stop()
@@ -238,23 +236,19 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             return (term, clusters, docs_within)
         return _co_predict_clusterer_pyspark_
     @staticmethod
-    def _build_term_representation_pyspark_(get_subgraph):
-        def _co_build_term_representation_pyspark_(x):
-            (term, clusters, docs_within) = x
-            _clusters = []
-            mapper = [ [] for i in range(max(clusters)+1) ]
-            list(map(lambda x: mapper[x[1]].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
-            for doc_in_cluster in mapper:
-                # map subgraphs
-                subgraphs = list(map(lambda x: get_subgraph(x, term) , doc_in_cluster))
-                # reduce subgraphs
-                selected_subgraph = nx.DiGraph()
-                for subgraph in subgraphs:
-                    selected_subgraph = _join_graph_(selected_subgraph, subgraph)
-                selected_subgraph = _norm_graph_(selected_subgraph)
-                _clusters.append( selected_subgraph )
-            return (term, _clusters)
-        return _co_build_term_representation_pyspark_
+    def _build_term_representation_pyspark_(x):
+        (term, clusters, docs_within) = x
+        _clusters = []
+        mapper = [ [] for i in range(max(clusters)+1) ]
+        list(map(lambda x: mapper[x[1]].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
+        for subgraphs in mapper:
+            # reduce subgraphs
+            selected_subgraph = nx.DiGraph()
+            for subgraph in subgraphs:
+                selected_subgraph = _join_graph_(selected_subgraph, subgraph)
+            selected_subgraph = _norm_graph_(selected_subgraph)
+            _clusters.append( selected_subgraph )
+        return (term, _clusters)
     
     # General Methods
     def _statistics_(self, terms_idx):
