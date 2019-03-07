@@ -6,7 +6,7 @@ Created on Mon Nov 19 11:38:02 2018
 from segtok.segmenter import split_multi
 from segtok.tokenizer import web_tokenizer, split_contractions
 
-from pyspark import SparkContext, SparkConf
+from pyspark import SparkContext, SparkConf, StorageLevel
 from pyspark.sql import SparkSession
 
 from .DataRepresentation import Document
@@ -183,15 +183,19 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #sc = ss.sparkContext
         #sc.setLogLevel('INFO' if verbose else 'ERROR')
         
-        rdd_of_docs = sc.parallelize(list_of_docs).repartition(multiprocessing.cpu_count()*10)
+        rdd_of_docs = sc.parallelize(list_of_docs).repartition(100)#.repartition(multiprocessing.cpu_count()*10)
         
         # Create index of terms
-        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_ ).groupByKey().mapValues(list)
+        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) ).groupByKey().mapValues(list)
+
+        #index_of_docs.cache(StorageLevel.MEMORY_AND_DISK_SER)
         
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile, self.metric) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._build_term_representation_pyspark_(self._get_subgraph_) )
+
+        rdd_of_matrix.persist(StorageLevel.MEMORY_AND_DISK_SER)
         
         # Run query
         result_clusters = rdd_of_matrix.collect()
@@ -210,8 +214,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #del sc
     # try https://stackoverflow.com/questions/32505426/how-to-process-rdds-using-a-python-class
     @staticmethod
-    def _create_index_pyspark_(doc):
-        return [(node, doc.G) for node in doc.G.nodes]
+    def _create_index_pyspark_(_get_subgraph_):
+        def _co_create_index_pyspark_(doc):
+            return [(node, _get_subgraph_(doc.G, node)) for node in doc.G.nodes]
+        return _co_create_index_pyspark_
     @staticmethod
     def _create_matrix_pyspark_(diss_func):
         def _co_create_matrix_pyspark_(x):
@@ -339,12 +345,16 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 #gc.collect(2)
     def _get_default_spark_config_(self):
         cpu_count = multiprocessing.cpu_count()
-        memory = psutil.virtual_memory().total
+        memory = int(psutil.virtual_memory().available*0.8)
+        #memory = psutil.virtual_memory().available
+        executor_memory = int(0.1*memory)
+        driver_memory = memory - executor_memory
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
         spark_config = spark_config.setMaster("local[%d]" % cpu_count)
-        spark_config = spark_config.set("spark.executor.memory", "%d" % memory)
-        spark_config = spark_config.set("spark.driver.memory", "%d" % memory)
+        spark_config = spark_config.set("spark.executor.memory", "%d" % executor_memory)
+        spark_config = spark_config.set("spark.driver.memory", "%d" % driver_memory) #
+        #spark_config = spark_config.set("spark.memory.fraction", "0.1")
         spark_config = spark_config.set("spark.executor.heartbeatInterval", "1000s") #
         spark_config = spark_config.set("spark.network.timeout", "10000s")
         return spark_config
