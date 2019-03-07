@@ -70,6 +70,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.pooling = pooling
         self.assignment = assignment
         self.spark_config = spark_config if spark_config is not None else self._get_default_spark_config_()
+        #self.ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
         #self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
         self._set_direction_(direction)
@@ -189,7 +190,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
         sc = SparkContext(conf=self.spark_config).getOrCreate()
         #ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
-        #sc = ss.sparkContext
+        #sc = self.ss.sparkContext
         #sc.setLogLevel('INFO' if verbose else 'ERROR')
         
         rdd_of_docs = sc.parallelize(list_of_docs).repartition(100)#.repartition(multiprocessing.cpu_count()*10)
@@ -206,9 +207,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x[1]) > 0 )
 
         rdd_of_matrix.persist(StorageLevel.MEMORY_AND_DISK_SER)
-        
-        # Run query
         result_clusters = rdd_of_matrix.collect()
+        rdd_of_matrix.unpersist()
+        del rdd_of_matrix
         
         for (term, clusters) in result_clusters:
             self._labels_map[term] = []
@@ -218,9 +219,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 self._clusters.append( selected_subgraph )
 
         sc.stop()
-        #ss.stop()
-        #ss.stop()
-        #del sc
+        del sc
+        gc.collect()
     # try https://stackoverflow.com/questions/32505426/how-to-process-rdds-using-a-python-class
     @staticmethod
     def _create_index_pyspark_(_get_subgraph_):
