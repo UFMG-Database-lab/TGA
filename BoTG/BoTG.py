@@ -16,6 +16,7 @@ import concurrent.futures
 #from multiprocessing.pool import ThreadPool
 from multiprocessing.dummy import Pool as ThreadPool
 
+from scipy.sparse import lil_matrix
 
 import networkx as nx
 import numpy as np
@@ -96,16 +97,24 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #self._build_clusters_(docs, terms_idx, verbose=verbose)
 
         return self
+    # Return a csr sparse matrix
     def transform(self, X, pooling=None, assignment=None, format_doc=None, verbose=False):
         _format = self._validate_format_(format_doc)
         _assignment_ = self._get_assignment_function_(assignment)
         _pooling_ = self._get_pooling_function_(pooling)
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
-        X_result = np.array([ _pooling_(terms_assignments) for terms_assignments in [ np.array([ _assignment_(term, doc.G) for term in doc.G.nodes ]) for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.) ] ])        
+        X_result = lil_matrix( (len(docs),len(self._clusters)), dtype=np.float64 )
+        for (i,doc) in tqdm(enumerate(docs), desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
+            terms_assignments = lil_matrix( (len(doc.G.nodes),len(self._clusters)), dtype=np.float64 )
+            for (j, term) in enumerate(doc.G.nodes):
+                terms_assignments[j,] = _assignment_(term, doc.G)
+            X_result[i,] = _pooling_( terms_assignments )
+            del terms_assignments
+        #X_result = np.array([ _pooling_(terms_assignments) for terms_assignments in [ [ _assignment_(term, doc.G) for term in doc.G.nodes ] for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.) ] ])        
         #for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
         #    terms_assignments = np.array([ _assignment_(term, doc.G) for term in doc.G.nodes ])
         #    X_result.append( _pooling_(terms_assignments) )
-        return np.array(X_result)
+        return X_result.tocsr()
     
     # private methods
 
@@ -114,12 +123,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     #self._labels = [ (term, id_cluster) ]
     #self._labels_map = { term: [id_cluster] }
     def _hard_assignment_(self, term, graph):
-        result = np.zeros(len(self._clusters))
+        #result = np.zeros(len(self._clusters))
+        result = lil_matrix((1,len(self._clusters)), dtype=np.float64)
         if term not in self._labels_map:
             return result
         values = [ (id_cluster, self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]
         j = min(values, key=lambda x: x[1] )[0]
-        result[j] = 1.
+        result[0,j] = 1.
         return result
     def _soft_assignment_(self, term, graph):
         result = np.ones(len(self._clusters))
@@ -130,11 +140,12 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         result = K(result)
         return result / result.sum()
     def _unorm_assignment_(self, term, graph):
-        result = np.zeros(len(self._clusters))
+        # result = np.zeros(len(self._clusters))
+        result = lil_matrix((1,len(self._clusters)), dtype=np.float64)
         if term not in self._labels_map:
             return result
         j, values = list(zip(*[ (id_cluster, 1.-self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
-        result[list(j)] = list(values)
+        result[0,list(j)] = list(values)
         return result / result.sum()
     def _get_assignment_function_(self, assignment):
         if assignment is None:
@@ -341,7 +352,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         cpu_count = multiprocessing.cpu_count()
         memory = int(psutil.virtual_memory().available*0.8)
         #memory = psutil.virtual_memory().available
-        executor_memory = int(0.1*memory)
+        executor_memory = max(int(0.1*memory), 471859200)
         driver_memory = memory - executor_memory
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
