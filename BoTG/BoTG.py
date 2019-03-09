@@ -435,18 +435,27 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 #gc.collect(2)
     def _get_default_spark_config_(self):
         cpu_count = multiprocessing.cpu_count()
-        memory = int(psutil.virtual_memory().available*0.8)
+        memory = int(psutil.virtual_memory().free*0.8)
         #memory = psutil.virtual_memory().available
-        executor_memory = max(int(0.5*memory), 471859200)
+        executor_memory = max(int(0.8*memory), 471859200)
         driver_memory = memory - executor_memory
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
         spark_config = spark_config.setMaster("local[%d]" % cpu_count)
+        
         spark_config = spark_config.set("spark.executor.memory", "%d" % executor_memory)
-        spark_config = spark_config.set("spark.driver.memory", "%d" % driver_memory) #
-        #spark_config = spark_config.set("spark.memory.fraction", "0.1")
-        spark_config = spark_config.set("spark.executor.heartbeatInterval", "1000s") #
+        #spark_config = spark_config.set("spark.executor.memory", "%d" % int(executor_memory*0.5))
+        #spark_config = spark_config.set("spark.executor.pyspark.memory", "%d" % int(executor_memory*0.5))
+
+        spark_config = spark_config.set("spark.driver.memory", "%d" % driver_memory)
+
+        spark_config = spark_config.set("spark.cleaner.periodicGC.interval", "1min")
+
+        spark_config = spark_config.set("spark.memory.fraction", "0.9")
+        
+        spark_config = spark_config.set("spark.executor.heartbeatInterval", "1000s")
         spark_config = spark_config.set("spark.network.timeout", "10000s")
+        
         return spark_config
     def _define_chunks_hard_(self, array_to_chunk, verbose=False):
         aval = psutil.virtual_memory().available
