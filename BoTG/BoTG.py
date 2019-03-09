@@ -16,7 +16,7 @@ import concurrent.futures
 #from multiprocessing.pool import ThreadPool
 from multiprocessing.dummy import Pool as ThreadPool
 
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, csr_matrix
 
 import networkx as nx
 import numpy as np
@@ -60,7 +60,7 @@ VALID_FORMATS = ['doc', 'raw', 'filename']
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
-    direction='both', metric='cosine', quantile=0.1, pooling='mean', assignment='hard', spark_config=None):
+    direction='both', metric='cosine', quantile=0.1, pooling='mean', assignment='hard', spark=None):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
@@ -69,11 +69,14 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self.quantile = quantile
         self.pooling = pooling
         self.assignment = assignment
-        self.spark_config = spark_config if spark_config is not None else self._get_default_spark_config_()
-        #self.ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
-        #self.n_jobs = n_jobs if n_jobs is not None else multiprocessing.cpu_count()
 
+        self._set_spark_(spark)
         self._set_direction_(direction)
+
+        self._clusters = []
+        self._labels = []
+        self._labels_map = {}
+        self._fit_=False
         """
         self.memory_strategy = memory_strategy
         if self.memory_strategy == 'norm':
@@ -83,6 +86,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         elif self.memory_strategy == 'soft':
             self._chunk_strategy = self._define_chunks_soft_
         """
+    def __str__(self):
+        return "<BoTG(assig=%s, pooling=%s, metric=%s, nclusters=%d, unique_terms=%d)>" % (self.assignment, self.pooling, self.metric, len(self._clusters), len(self._labels_map))
 
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
@@ -94,6 +99,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
 
         self._build_clusters_pyspark_(docs, verbose=verbose)
+
+        self._fit_=True
+
         #terms_idx = self._build_term_idx_(docs, verbose=verbose)
         #self._build_clusters_(docs, terms_idx, verbose=verbose)
 
@@ -104,48 +112,121 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         _assignment_ = self._get_assignment_function_(assignment)
         _pooling_ = self._get_pooling_function_(pooling)
         docs = self._get_documents_obj_(X, _format, verbose=verbose)
-        X_result = lil_matrix( (len(docs),len(self._clusters)), dtype=np.float64 )
-        for (i,doc) in tqdm(enumerate(docs), desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
+
+        X_result = self._tranform_pyspark_(docs, _assignment_, _pooling_)
+        #X_result = np.array([ _pooling_(terms_assignments) for terms_assignments in [ [ _assignment_(term, doc.G) for term in doc.G.nodes ] for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.) ] ])        
+        #for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
+        #    terms_assignments = np.array([ _assignment_(term, doc.G) for term in doc.G.nodes ])
+        #    X_result.append( _pooling_(terms_assignments) )
+        return X_result
+        
+    def _tranform_pyspark_(self, list_of_docs, _assignment_, _pooling_):
+        if self._sc_ is None:
+            sc = SparkContext(conf=self.spark_config).getOrCreate()
+        else:
+            sc = self._sc_
+        
+        rdd_of_docs = sc.parallelize(list_of_docs).repartition(100)
+
+        rdd_of_docs = rdd_of_docs.zipWithIndex().flatMap( BoTG._build_each_term_vectors_(len(self._clusters), self._get_subgraph_) )
+        rdd_of_docs = rdd_of_docs.filter( lambda x: len(x[2].nodes) > 1 )
+        rdd_of_docs = rdd_of_docs.map( BoTG._assignment_vector_(self.dissimilarity_func, self._clusters, self._labels_map, _assignment_) ) 
+        rdd_of_docs = rdd_of_docs.groupByKey().mapValues(BoTG._convert_to_sparse_matrix_(len(self._clusters))).mapValues(_pooling_)
+
+        rdd_of_docs.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        
+        result = rdd_of_docs.collect()
+
+        rdd_of_docs.unpersist()
+        del rdd_of_docs
+        gc.collect()
+
+        # .tocsr()
+        if self._sc_ is None:
+            sc.stop()
+            del sc
+
+        new_result = lil_matrix( (len(list_of_docs), len(self._clusters)), dtype=np.float64 )
+        for idx,v in sorted(result, key=lambda x: x[0]):
+            new_result[idx,] = v[0,]
+        
+        return new_result.tocsr()
+        
+        """
+        X_result = lil_matrix( (len(list_of_docs),len(self._clusters)), dtype=np.float64 )
+        for (i,doc) in tqdm(enumerate(list_of_docs), desc="Building representation", total=len(list_of_docs), position=0, smoothing=0.):
             terms_assignments = lil_matrix( (len(doc.G.nodes),len(self._clusters)), dtype=np.float64 )
             for (j, term) in enumerate(doc.G.nodes):
                 terms_assignments[j,] = _assignment_(term, doc.G)
             X_result[i,] = _pooling_( terms_assignments )
             del terms_assignments
-        #X_result = np.array([ _pooling_(terms_assignments) for terms_assignments in [ [ _assignment_(term, doc.G) for term in doc.G.nodes ] for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.) ] ])        
-        #for doc in tqdm(docs, desc="Building representation", total=len(docs), position=0, disable=not verbose, smoothing=0.):
-        #    terms_assignments = np.array([ _assignment_(term, doc.G) for term in doc.G.nodes ])
-        #    X_result.append( _pooling_(terms_assignments) )
-        return X_result.tocsr()
+        """
+        
+    @staticmethod
+    def _build_each_term_vectors_(n_clusters, _get_subgraph_):
+        def _co_build_each_term_vectors_(x):
+            doc, idx = x
+            return [ (idx, node, _get_subgraph_(doc.G, node)) for node in doc.G.nodes ]
+        return _co_build_each_term_vectors_
     
+    @staticmethod
+    def _assignment_vector_(dissimilarity_func, _clusters, _labels_map, _assignment_func_):
+        def _co_assignment_vector_(x):
+            idx, term, graph = x
+            vector = _assignment_func_(term, graph, dissimilarity_func, _clusters, _labels_map)
+            return  (idx, vector)
+        return _co_assignment_vector_
+    @staticmethod
+    def _convert_to_sparse_matrix_(n_clusters):
+        def _co_convert_to_sparse_matrix_(X):
+            X = list(X)
+            matrix = lil_matrix((len(X),n_clusters), dtype=np.float64)
+            for i,x in enumerate(X):
+                matrix[i,] = x
+            return matrix
+        return _co_convert_to_sparse_matrix_
+
     # private methods
 
     # Assignment functions
     #self._clusters = [ subgraph ]
     #self._labels = [ (term, id_cluster) ]
     #self._labels_map = { term: [id_cluster] }
-    def _hard_assignment_(self, term, graph):
-        #result = np.zeros(len(self._clusters))
-        result = lil_matrix((1,len(self._clusters)), dtype=np.float64)
-        if term not in self._labels_map:
+    
+
+    @staticmethod
+    def _hard_assignment_(term, graph, dissimilarity_func, _clusters, _labels_map):
+        result = lil_matrix((1,len(_clusters)), dtype=np.float64)
+        if term not in _labels_map:
             return result
-        values = [ (id_cluster, self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]
-        j = min(values, key=lambda x: x[1] )[0]
-        result[0,j] = 1.
+        values = [ (id_cluster, 1.-dissimilarity_func(graph, _clusters[id_cluster], term)) for id_cluster in _labels_map[term] ]
+
+        idx_max = max(values, key=lambda x: x[1] )[0]
+        result[0,idx_max] = 1.
+        
+        """
+        maximum = max(values, key=lambda x: x[1] )[1]
+        indices = [i for (i, v) in enumerate(values) if v == maximum]
+        for idx in indices:
+            result[0,idx] = 1.
+        """
         return result
-    def _soft_assignment_(self, term, graph):
-        result = np.ones(len(self._clusters))
-        if term not in self._labels_map:
+    @staticmethod
+    def _soft_assignment_(term, graph, dissimilarity_func, _clusters, _labels_map):
+        result = np.ones(len(_clusters))
+        if term not in _labels_map:
             return result / result.sum()
-        j, values = list(zip(*[ (id_cluster, self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
+        j, values = list(zip(*[ (id_cluster, 1-dissimilarity_func(graph, _clusters[id_cluster], term)) for id_cluster in _labels_map[term] ]))
         result[list(j)] = list(values)
         result = K(result)
         return result / result.sum()
-    def _unorm_assignment_(self, term, graph):
+    @staticmethod
+    def _unorm_assignment_(term, graph, dissimilarity_func, _clusters, _labels_map):
         # result = np.zeros(len(self._clusters))
-        result = lil_matrix((1,len(self._clusters)), dtype=np.float64)
-        if term not in self._labels_map:
+        result = lil_matrix((1,len(_clusters)), dtype=np.float64)
+        if term not in _labels_map:
             return result
-        j, values = list(zip(*[ (id_cluster, 1.-self.dissimilarity_func(graph, self._clusters[id_cluster], term)) for id_cluster in self._labels_map[term] ]))
+        j, values = list(zip(*[ (id_cluster, 1.-dissimilarity_func(graph, _clusters[id_cluster], term)) for id_cluster in _labels_map[term] ]))
         result[0,list(j)] = list(values)
         return result / result.sum()
     def _get_assignment_function_(self, assignment):
@@ -154,19 +235,22 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if callable(assignment):
             return assignment
         if assignment == 'hard':
-            return self._hard_assignment_
+            return BoTG._hard_assignment_
         if assignment == 'soft':
-            return self._soft_assignment_
+            return BoTG._soft_assignment_
         if assignment == 'unorm':
-            return self._unorm_assignment_
+            return BoTG._unorm_assignment_
         raise ValueError("%s assignment does not available." % assignment) 
 
     # Pooling functions
-    def _mean_pooling_(self, X):
+    @staticmethod
+    def _mean_pooling_(X):
         return X.mean(axis=0)
-    def _max_pooling_(self, X):
+    @staticmethod
+    def _max_pooling_(X):
         return X.max(axis=0)
-    def _sum_pooling_(self, X):
+    @staticmethod
+    def _sum_pooling_(X):
         return X.sum(axis=0)
     def _get_pooling_function_(self, pooling):
         if pooling is None:
@@ -184,19 +268,17 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     # Algorithm methods
     # PySpark methods
     def _build_clusters_pyspark_(self, list_of_docs, verbose=False):
-        self._clusters = []
-        self._labels = []
-        self._labels_map = {}
         
-        sc = SparkContext(conf=self.spark_config).getOrCreate()
-        #ss = SparkSession.builder.config(conf=self.spark_config).getOrCreate()
-        #sc = self.ss.sparkContext
+        if self._sc_ is None:
+            sc = SparkContext(conf=self.spark_config).getOrCreate()
+        else:
+            sc = self._sc_
         #sc.setLogLevel('INFO' if verbose else 'ERROR')
         
         rdd_of_docs = sc.parallelize(list_of_docs).repartition(100)#.repartition(multiprocessing.cpu_count()*10)
         
         # Create index of terms
-        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) ).groupByKey().mapValues(list)
+        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) ).filter(lambda x: len(x[1].nodes) > 1).groupByKey().mapValues(list)
 
         #index_of_docs.cache(StorageLevel.MEMORY_AND_DISK_SER)
         
@@ -207,6 +289,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x[1]) > 0 )
 
         rdd_of_matrix.persist(StorageLevel.MEMORY_AND_DISK_SER)
+
         result_clusters = rdd_of_matrix.collect()
         rdd_of_matrix.unpersist()
         del rdd_of_matrix
@@ -218,8 +301,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 self._labels_map[term].append(len(self._clusters))
                 self._clusters.append( selected_subgraph )
 
-        sc.stop()
-        del sc
+        if self._sc_ is None:
+            sc.stop()
+            del sc
+
         gc.collect()
     # try https://stackoverflow.com/questions/32505426/how-to-process-rdds-using-a-python-class
     @staticmethod
@@ -447,6 +532,19 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _make_params2_(self,terms_idx_chunk, pool, verbose):
         for i, (term, docs) in enumerate(terms_idx_chunk):
             yield (term, docs, self.quantile, self.metric, self.dissimilarity_func, self._get_subgraph_, pool, i == 0 and verbose)
+    def _set_spark_(self, spark):
+        if spark is None:
+            self.spark_config = self._get_default_spark_config_()
+            self._sc_ = None
+        elif isinstance(spark, SparkConf):
+            self.spark_config = spark
+            self._sc_ = None
+        elif isinstance(spark, SparkContext):
+            self.spark_config = None
+            self._sc_ = spark
+        elif isinstance(spark, SparkSession):
+            self.spark_config = None
+            self._sc_ = spark.sparkContext
     def _set_direction_(self, direction):
         self.direction = direction
         if self.direction == 'out':
