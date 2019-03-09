@@ -245,13 +245,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     # Pooling functions
     @staticmethod
     def _mean_pooling_(X):
-        return X.mean(axis=0)
+        return csr_matrix(X.mean(axis=0))
     @staticmethod
     def _max_pooling_(X):
-        return X.max(axis=0)
+        return csr_matrix(X.max(axis=0))
     @staticmethod
     def _sum_pooling_(X):
-        return X.sum(axis=0)
+        return csr_matrix(X.sum(axis=0))
     def _get_pooling_function_(self, pooling):
         if pooling is None:
             pooling = self.pooling
@@ -437,7 +437,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         cpu_count = multiprocessing.cpu_count()
         memory = int(psutil.virtual_memory().available*0.8)
         #memory = psutil.virtual_memory().available
-        executor_memory = max(int(0.1*memory), 471859200)
+        executor_memory = max(int(0.5*memory), 471859200)
         driver_memory = memory - executor_memory
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
