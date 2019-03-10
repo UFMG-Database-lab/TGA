@@ -85,3 +85,4 @@ if __name__ == '__main__':
                                 print("  %s" % filename_test)
                                 X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
                                 dump_svmlight_file(X,y_test, path.join(args.output,filename_test))
+                        botg.close()

@@ -73,10 +73,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._set_spark_(spark)
         self._set_direction_(direction)
 
-        self._clusters = []
-        self._labels = []
-        self._labels_map = {}
-        self._fit_=False
+        self._model_rdd_=None
         """
         self.memory_strategy = memory_strategy
         if self.memory_strategy == 'norm':
@@ -87,7 +84,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             self._chunk_strategy = self._define_chunks_soft_
         """
     def __str__(self):
-        return "<BoTG(assig=%s, pooling=%s, metric=%s, nclusters=%d, unique_terms=%d)>" % (self.assignment, self.pooling, self.metric, len(self._clusters), len(self._labels_map))
+        if self._model_rdd_ is None:
+            return "<BoTG(assig=%s, pooling=%s, metric=%s)>" % (self.assignment, self.pooling, self.metric)
+        return "<BoTG(assig=%s, pooling=%s, metric=%s, nclusters=%d, unique_terms=%d)>" % (self.assignment, self.pooling, self.metric, self._n_clusters, self._unique_terms)
 
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
@@ -121,32 +120,27 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return X_result
         
     def _tranform_pyspark_(self, list_of_docs, _assignment_, _pooling_):
-        if self._sc_ is None:
-            sc = SparkContext(conf=self.spark_config).getOrCreate()
-        else:
-            sc = self._sc_
         
-        rdd_of_docs = sc.parallelize(list_of_docs).repartition(100)
+        rdd_of_docs = self._sc_.parallelize(list_of_docs).repartition(100)
 
-        rdd_of_docs = rdd_of_docs.zipWithIndex().flatMap( BoTG._build_each_term_vectors_(len(self._clusters), self._get_subgraph_) )
-        rdd_of_docs = rdd_of_docs.filter( lambda x: len(x[2].nodes) > 1 )
-        rdd_of_docs = rdd_of_docs.map( BoTG._assignment_vector_(self.dissimilarity_func, self._clusters, self._labels_map, _assignment_) ) 
-        rdd_of_docs = rdd_of_docs.groupByKey().mapValues(BoTG._convert_to_sparse_matrix_(len(self._clusters))).mapValues(_pooling_)
+        rdd_of_docs = rdd_of_docs.zipWithIndex().flatMap( BoTG._build_each_term_vectors_(self._get_subgraph_) )
 
-        rdd_of_docs.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        joined_terms_doc = rdd_of_docs.join( self._model_rdd_ ) # result in [ (term, ((idx_doc, subgraph), ([(idx_cluster,subcluster)]))) ] 
+        joined_terms_doc = joined_terms_doc.map( BoTG._assignment_vector_(self.dissimilarity_func, _assignment_, self._n_clusters) )
+
+        #rdd_of_docs = rdd_of_docs.filter( lambda x: len(x[2].nodes) > 1 )
         
-        result = rdd_of_docs.collect()
+        mapped_term_values = joined_terms_doc.groupByKey().mapValues(BoTG._convert_to_sparse_matrix_(self._n_clusters)).mapValues(_pooling_)
 
-        rdd_of_docs.unpersist()
-        del rdd_of_docs
+        mapped_term_values.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        
+        result = mapped_term_values.collect()
+
+        mapped_term_values.unpersist()
+        del mapped_term_values
         gc.collect()
 
-        # .tocsr()
-        if self._sc_ is None:
-            sc.stop()
-            del sc
-
-        new_result = lil_matrix( (len(list_of_docs), len(self._clusters)), dtype=np.float64 )
+        new_result = lil_matrix( (len(list_of_docs), self._n_clusters), dtype=np.float64 )
         for idx,v in sorted(result, key=lambda x: x[0]):
             new_result[idx,] = v[0,]
         
@@ -163,18 +157,18 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         """
         
     @staticmethod
-    def _build_each_term_vectors_(n_clusters, _get_subgraph_):
+    def _build_each_term_vectors_(_get_subgraph_):
         def _co_build_each_term_vectors_(x):
             doc, idx = x
-            return [ (idx, node, _get_subgraph_(doc.G, node)) for node in doc.G.nodes ]
+            return [ (node, (idx, _get_subgraph_(doc.G, node))) for node in doc.G.nodes ]
         return _co_build_each_term_vectors_
     
     @staticmethod
-    def _assignment_vector_(dissimilarity_func, _clusters, _labels_map, _assignment_func_):
+    def _assignment_vector_(dissimilarity_func, _assignment_func_, n_cluster):
         def _co_assignment_vector_(x):
-            idx, term, graph = x
-            vector = _assignment_func_(term, graph, dissimilarity_func, _clusters, _labels_map)
-            return  (idx, vector)
+            (term, ((idx_doc, graph), clusters )) = x
+            vector = _assignment_func_(term, graph, dissimilarity_func, lil_matrix((1,n_cluster), dtype=np.float64), clusters)
+            return (idx_doc, vector)
         return _co_assignment_vector_
     @staticmethod
     def _convert_to_sparse_matrix_(n_clusters):
@@ -195,14 +189,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     
 
     @staticmethod
-    def _hard_assignment_(term, graph, dissimilarity_func, _clusters, _labels_map):
-        result = lil_matrix((1,len(_clusters)), dtype=np.float64)
-        if term not in _labels_map:
-            return result
-        values = [ (id_cluster, 1.-dissimilarity_func(graph, _clusters[id_cluster], term)) for id_cluster in _labels_map[term] ]
+    def _hard_assignment_(term, graph, dissimilarity_func, vector, clusters):
+        if len(clusters) == 0:
+            return vector
+        values = [ (id_cluster, 1.-dissimilarity_func(graph, cluster_graph, term)) for (id_cluster, cluster_graph) in clusters ]
 
         idx_max = max(values, key=lambda x: x[1] )[0]
-        result[0,idx_max] = 1.
+        vector[0,idx_max] = 1.
         
         """
         maximum = max(values, key=lambda x: x[1] )[1]
@@ -210,25 +203,13 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for idx in indices:
             result[0,idx] = 1.
         """
-        return result
+        return vector
     @staticmethod
-    def _soft_assignment_(term, graph, dissimilarity_func, _clusters, _labels_map):
-        result = np.ones(len(_clusters))
-        if term not in _labels_map:
-            return result / result.sum()
-        j, values = list(zip(*[ (id_cluster, 1-dissimilarity_func(graph, _clusters[id_cluster], term)) for id_cluster in _labels_map[term] ]))
-        result[list(j)] = list(values)
-        result = K(result)
-        return result / result.sum()
-    @staticmethod
-    def _unorm_assignment_(term, graph, dissimilarity_func, _clusters, _labels_map):
+    def _unorm_assignment_(term, graph, dissimilarity_func, vector, clusters):
         # result = np.zeros(len(self._clusters))
-        result = lil_matrix((1,len(_clusters)), dtype=np.float64)
-        if term not in _labels_map:
-            return result
-        j, values = list(zip(*[ (id_cluster, 1.-dissimilarity_func(graph, _clusters[id_cluster], term)) for id_cluster in _labels_map[term] ]))
-        result[0,list(j)] = list(values)
-        return result / result.sum()
+        for (idx_cluster, cluster) in clusters:
+            vector[0,idx_cluster] = 1.-dissimilarity_func(graph, cluster, term)
+        return vector / vector.sum()
     def _get_assignment_function_(self, assignment):
         if assignment is None:
             assignment = self.assignment
@@ -268,43 +249,51 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     # Algorithm methods
     # PySpark methods
     def _build_clusters_pyspark_(self, list_of_docs, verbose=False):
-        
-        if self._sc_ is None:
-            sc = SparkContext(conf=self.spark_config).getOrCreate()
-        else:
-            sc = self._sc_
         #sc.setLogLevel('INFO' if verbose else 'ERROR')
         
-        rdd_of_docs = sc.parallelize(list_of_docs).repartition(100)#.repartition(multiprocessing.cpu_count()*10)
+        # (stage 0) Create repartitions
+        rdd_of_docs = self._sc_.parallelize(list_of_docs).repartition(100)#.repartition(multiprocessing.cpu_count()*10)
         
-        # Create index of terms
-        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) ).filter(lambda x: len(x[1].nodes) > 1).groupByKey().mapValues(list)
-
-        #index_of_docs.cache(StorageLevel.MEMORY_AND_DISK_SER)
+        # (stage 1) flatMap: Create terms occurences
+        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) ).filter(lambda x: len(x[1].nodes) > 1)
+        
+        # (stage 2) groupByKey: Indexer
+        index_of_docs = index_of_docs.groupByKey().mapValues(list)
         
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile, self.metric) )
-        rdd_of_matrix = rdd_of_matrix.map( BoTG._build_term_representation_pyspark_ )
+        rdd_of_matrix = rdd_of_matrix.flatMap( BoTG._build_term_representation_pyspark_ )
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x[1]) > 0 )
+        rdd_of_matrix = rdd_of_matrix.zipWithIndex().map( lambda x: (x[0][0], x[1], x[0][1]))
+        rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_ ).groupByKey().sortByKey().mapValues(list)
 
-        rdd_of_matrix.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        self._model_rdd_ = rdd_of_matrix
+        self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK_SER)
 
+        self._n_clusters = self._model_rdd_.map(lambda x: max( [xs[0] for xs in x[1]] ) ).max()+1
+        self._unique_terms = self._model_rdd_.count()
+
+        """
+        # (stage 3) collect: get the ResultStage
+        
         result_clusters = rdd_of_matrix.collect()
+
         rdd_of_matrix.unpersist()
         del rdd_of_matrix
         
+        self._n_clusters = 0
         for (term, clusters) in result_clusters:
             self._labels_map[term] = []
-            for i, selected_subgraph in enumerate(clusters):
-                self._labels.append( (term, (i, len(self._clusters))) )
-                self._labels_map[term].append(len(self._clusters))
-                self._clusters.append( selected_subgraph )
+            for selected_subgraph in clusters:
+                self._labels_map[term].append( (self._n_clusters, selected_subgraph) )
+                self._n_clusters += 1
+        self._n_clusters 
 
         if self._sc_ is None:
             sc.stop()
             del sc
-
+        """
         gc.collect()
     # try https://stackoverflow.com/questions/32505426/how-to-process-rdds-using-a-python-class
     @staticmethod
@@ -334,6 +323,15 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     @staticmethod
     def _build_term_representation_pyspark_(x):
         (term, clusters, docs_within) = x
+
+        (term, clusters, docs_within) = x
+        mapper = [ (term, []) for i in range(max(clusters)+1) ]
+        list(map(lambda x: mapper[x[1]][1].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
+        return mapper
+        # return (term, mapper) 
+
+        # then flatMap(_build_term_representation_pyspark_).mapValues( "_join_subgraphs_" ).mapValues( _norm_graph_ ).reduceByKey( "concat" )
+        """
         _clusters = []
         mapper = [ [] for i in range(max(clusters)+1) ]
         list(map(lambda x: mapper[x[1]].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
@@ -345,7 +343,16 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             selected_subgraph = _norm_graph_(selected_subgraph)
             _clusters.append( selected_subgraph )
         return (term, _clusters)
-    
+        """
+    @staticmethod
+    def _join_subgraphs_(x):
+        (term, idd, subgraphs) = x
+        selected_subgraph = nx.DiGraph()
+        for subgraph in subgraphs:
+            selected_subgraph = _join_graph_(selected_subgraph, subgraph)
+        selected_subgraph = _norm_graph_(selected_subgraph)
+        return (term, (idd, selected_subgraph))
+
     # General Methods
     def _statistics_(self, terms_idx):
         terms_idx_ = [ (term, docs_within) for (term, docs_within) in terms_idx if len(docs_within) >= self.min_df ]
@@ -435,9 +442,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 #gc.collect(2)
     def _get_default_spark_config_(self):
         cpu_count = multiprocessing.cpu_count()
-        memory = int(psutil.virtual_memory().free*0.8)
+        memory = psutil.virtual_memory().free
         #memory = psutil.virtual_memory().available
-        executor_memory = max(int(0.8*memory), 471859200)
+        executor_memory = max(int(0.3*memory), 471859200)
         driver_memory = memory - executor_memory
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
@@ -544,16 +551,18 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _set_spark_(self, spark):
         if spark is None:
             self.spark_config = self._get_default_spark_config_()
-            self._sc_ = None
+            self._sc_ = SparkContext(conf=self.spark_config).getOrCreate()
         elif isinstance(spark, SparkConf):
             self.spark_config = spark
-            self._sc_ = None
+            self._sc_ = SparkContext(conf=self.spark_config).getOrCreate()
         elif isinstance(spark, SparkContext):
-            self.spark_config = None
             self._sc_ = spark
+            self.spark_config = self._sc_.getConf()
         elif isinstance(spark, SparkSession):
-            self.spark_config = None
             self._sc_ = spark.sparkContext
+            self.spark_config = self._sc_.getConf()
+    def close(self):
+        self._sc_.stop()
     def _set_direction_(self, direction):
         self.direction = direction
         if self.direction == 'out':
