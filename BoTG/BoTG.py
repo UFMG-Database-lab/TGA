@@ -339,4 +339,3 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if _format not in VALID_FORMATS:
             raise ValueError("%s format does not available." % _format)
         return _format
-
