@@ -1,4 +1,3 @@
-import numpy as np
 
 def dissimilarity_node_out(GA, GB, term):
     neighborsGA = GA[term]

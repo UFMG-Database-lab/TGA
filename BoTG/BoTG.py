@@ -11,50 +11,25 @@ from pyspark.sql import SparkSession
 
 from .DataRepresentation import Document
 
-import concurrent.futures
-
-#from multiprocessing.pool import ThreadPool
-from multiprocessing.dummy import Pool as ThreadPool
-
 from scipy.sparse import lil_matrix, csr_matrix
 
 import networkx as nx
 import numpy as np
-import pandas as pd
 
-from os import path
-import math
-
-import psutil, sys, operator
+import psutil
 
 import gc
 
-from .Utils import *
-from .Utils import process_term, garbage_collector, _norm_graph_, _join_graph_, _get_subgraph_both_, _get_subgraph_in_, _get_subgraph_out_
-from .dissimilatires import dissimilarity_node_in, dissimilarity_node_out, dissimilarity_node_both, dissimilarity_row
+from .Utils import _norm_graph_, _join_graph_, _get_subgraph_both_, _get_subgraph_in_, _get_subgraph_out_
+from .dissimilatires import dissimilarity_node_in, dissimilarity_node_out, dissimilarity_node_both
 from glob import glob
 from tqdm import tqdm
 
 from collections.abc import Iterable
 import multiprocessing
-from multiprocessing import Pool, Process
-#from .MeanShift._meanshift_ import build_clusters
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.metrics import pairwise_distances
-from sklearn.neighbors import NearestNeighbors 
 from sklearn import cluster
 
-from contextlib import closing
-
-import random
-
-from joblib import Parallel, delayed
-
-def process_chunk(params):
-    chunk, params_func, verbose = params
-    with Pool(processes=1) as executor:
-        for (term, clusters) in tqdm(executor.imap_unordered(process_term, params_func(chunk, verbose)), smoothing=0., total=len(chunk), position=1, desc="Building Clusters", disable=not verbose):
-            yield (term, clusters)
 
 VALID_FORMATS = ['doc', 'raw', 'filename']
 
