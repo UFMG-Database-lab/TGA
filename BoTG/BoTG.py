@@ -85,8 +85,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         """
     def __str__(self):
         if self._model_rdd_ is None:
-            return "<BoTG(assig=%s, pooling=%s, metric=%s)>" % (self.assignment, self.pooling, self.metric)
-        return "<BoTG(assig=%s, pooling=%s, metric=%s, nclusters=%d, unique_terms=%d)>" % (self.assignment, self.pooling, self.metric, self._n_clusters, self._unique_terms)
+            return "<BoTG(assig=%s, pooling=%s, metric=%s, direction=%s)>" % (self.assignment, self.pooling, self.metric, self.direction)
+        return "<BoTG(assig=%s, pooling=%s, metric=%s, direction=%s, nclusters=%d, unique_terms=%d)>" % (self.assignment, self.pooling, self.metric, self.direction, self._n_clusters, self._unique_terms)
 
     def fit(self, X, y=None, format_doc=None, verbose=False, **fit_params):
         _format = self._validate_format_(format_doc)
@@ -121,14 +121,14 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
     def _tranform_pyspark_(self, list_of_docs, _assignment_, _pooling_):
         
-        rdd_of_docs = self._sc_.parallelize(list_of_docs).repartition(100)
+        rdd_of_docs = self._sc_.parallelize(list_of_docs, 100)
 
-        rdd_of_docs = rdd_of_docs.zipWithIndex().flatMap( BoTG._build_each_term_vectors_(self._get_subgraph_) )
+        rdd_of_docs = rdd_of_docs.zipWithIndex().flatMap( BoTG._build_each_term_vectors_(self._get_subgraph_) )#.filter( lambda x: len(x[1][1].nodes) > 1 )
 
         joined_terms_doc = rdd_of_docs.join( self._model_rdd_ ) # result in [ (term, ((idx_doc, subgraph), ([(idx_cluster,subcluster)]))) ] 
         joined_terms_doc = joined_terms_doc.map( BoTG._assignment_vector_(self.dissimilarity_func, _assignment_, self._n_clusters) )
 
-        #rdd_of_docs = rdd_of_docs.filter( lambda x: len(x[2].nodes) > 1 )
+        #rdd_of_docs = rdd_of_docs
         
         mapped_term_values = joined_terms_doc.groupByKey().mapValues(BoTG._convert_to_sparse_matrix_(self._n_clusters)).mapValues(_pooling_)
 
@@ -252,10 +252,10 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         #sc.setLogLevel('INFO' if verbose else 'ERROR')
         
         # (stage 0) Create repartitions
-        rdd_of_docs = self._sc_.parallelize(list_of_docs).repartition(100)#.repartition(multiprocessing.cpu_count()*10)
+        rdd_of_docs = self._sc_.parallelize(list_of_docs, 100)#.repartition(multiprocessing.cpu_count()*10)
         
         # (stage 1) flatMap: Create terms occurences
-        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) ).filter(lambda x: len(x[1].nodes) > 1)
+        index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) )#.filter(lambda x: len(x[1].nodes) > 1)
         
         # (stage 2) groupByKey: Indexer
         index_of_docs = index_of_docs.groupByKey().mapValues(list)
