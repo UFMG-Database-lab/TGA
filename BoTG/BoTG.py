@@ -235,8 +235,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     @staticmethod
     def _build_term_representation_pyspark_(x):
         (term, clusters, docs_within) = x
-
-        (term, clusters, docs_within) = x
         mapper = [ (term, []) for i in range(max(clusters)+1) ]
         list(map(lambda x: mapper[x[1]][1].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
         return mapper
