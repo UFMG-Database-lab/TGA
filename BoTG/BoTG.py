@@ -120,7 +120,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return csr_matrix(X.mean(axis=0))
     @staticmethod
     def _max_pooling_(X):
-        return csr_matrix(X.max(axis=0))
+        return csr_matrix(X.tocsr().max(axis=0))
     @staticmethod
     def _sum_pooling_(X):
         return csr_matrix(X.sum(axis=0))
@@ -198,7 +198,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
-        rdd_of_matrix = rdd_of_matrix.map( BoTG._convert_matrix_pyspark_(self.metric) )
+        if self.metric != 'precomputed':
+            rdd_of_matrix = rdd_of_matrix.map( BoTG._convert_matrix_pyspark_(self.metric) )
         rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile) )
         rdd_of_matrix = rdd_of_matrix.flatMap( BoTG._build_term_representation_pyspark_ )
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x) > 0 )
@@ -270,8 +271,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         cpu_count = multiprocessing.cpu_count()
         memory = psutil.virtual_memory().free
         
-        executor_memory = max(int(0.3*memory), 471859200)
-        driver_memory = memory - executor_memory
+        executor_memory = max(int(0.8*memory), 5*1024*1024*1024)            # at least 5G
+        driver_memory   = max((memory - executor_memory), 5*1024*1024*1024) # at least 5G
+        
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
         spark_config = spark_config.setMaster("local[%d]" % cpu_count)
@@ -280,7 +282,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         spark_config = spark_config.set("spark.driver.memory", "%d" % driver_memory)
 
         spark_config = spark_config.set("spark.cleaner.periodicGC.interval", "1min")
-        spark_config = spark_config.set("spark.memory.fraction", "0.9")
+        #spark_config = spark_config.set("spark.memory.fraction", "0.9")
         
         spark_config = spark_config.set("spark.executor.heartbeatInterval", "1000s")
         spark_config = spark_config.set("spark.network.timeout", "10000s")

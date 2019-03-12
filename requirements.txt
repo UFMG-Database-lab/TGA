@@ -1,8 +1,9 @@
 segtok
+sklearn
+pyspark
+scipy
 networkx
 numpy
+psutil
 tqdm
-sklearn
-scipy
 nltk
-joblib

@@ -32,10 +32,9 @@ parser.add_argument('-w','--window', type=int, nargs='+', help='', default=[2])
 parser.add_argument('-df','--min_df', type=int, nargs='+', help='', default=[2])
 
 parser.add_argument('-p','--pooling', type=str, nargs='+', help='', default=['mean'], choices=['mean', 'max', 'sum'])
-parser.add_argument('-a','--assignment', type=str, nargs='+', help='', default=['hard'], choices=['hard', 'soft', 'unorm'])
+parser.add_argument('-a','--assignment', type=str, nargs='+', help='', default=['hard'], choices=['hard', 'unorm'])
 parser.add_argument('-m','--metric', type=str, nargs='+', help='', default=['cosine'])
-
-parser.add_argument('-ms','--memory-strategy', type=str, nargs='?', help='', default='soft', choices=['hard', 'soft', 'norm'])
+parser.add_argument('-dir','--direction', type=str, nargs='+', help='', default=['both'], choices=['in', 'out', 'both'])
 
 parser.add_argument('-o','--output', type=str, nargs='?', help='', default='output')
 
@@ -65,24 +64,25 @@ if __name__ == '__main__':
             docs = np.array(Document.load_path(doc_paths, w=w, verbose=not args.silence))
             for df in args.min_df:
                 for m in args.metric:
-                    for f, (train_index, test_index) in enumerate(skf.split(docs, y)):
-                        botg = BoTG(metric=m, min_df=df)
-                        #botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
-                        print("fold%d_%s_w%d_df%d_m-%s" % (f, dname,w,df,m))
-                        docs_train, y_train = docs[train_index], y[train_index]
-                        print("fitting")
-                        botg.fit(docs_train, verbose=not args.silence)
-                        print("transforming %s" % botg)
-                        for p in args.pooling:
-                            for a in args.assignment:
-                                filename_train = "train%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)
-                                print("  %s" % filename_train)
-                                X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
-                                dump_svmlight_file(X,y_train, path.join(args.output,filename_train))
+                    for direction in args.direction:
+                        for f, (train_index, test_index) in enumerate(skf.split(docs, y)):
+                            botg = BoTG(metric=m, min_df=df, direction=direction)
+                            #botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
+                            print("fold%d_%s_w%d_df%d_m-%s_dir-%s" % (f, dname,w,df,m,direction))
+                            docs_train, y_train = docs[train_index], y[train_index]
+                            print("fitting")
+                            botg.fit(docs_train, verbose=not args.silence)
+                            print("transforming %s" % botg)
+                            for p in args.pooling:
+                                for a in args.assignment:
+                                    filename_train = "train%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)
+                                    print("  %s" % filename_train)
+                                    X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
+                                    dump_svmlight_file(X,y_train, path.join(args.output,filename_train))
 
-                                docs_test, y_test = docs[test_index], y[test_index]
-                                filename_test = "test%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)
-                                print("  %s" % filename_test)
-                                X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
-                                dump_svmlight_file(X,y_test, path.join(args.output,filename_test))
-                        botg.close()
+                                    docs_test, y_test = docs[test_index], y[test_index]
+                                    filename_test = "test%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)
+                                    print("  %s" % filename_test)
+                                    X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
+                                    dump_svmlight_file(X,y_test, path.join(args.output,filename_test))
+                            botg.close()
