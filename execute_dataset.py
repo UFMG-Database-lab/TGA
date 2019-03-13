@@ -46,6 +46,11 @@ if not path.exists(args.output):
     except:
         print("Couldn't create the %s directory" % args.output)
 
+
+# Sample:
+
+# nohup python3 execute_dataset.py -d datasetpath -w 1 2 3 -df 2 3 4 -p mean max sum -a unorm hard -m cosine l2 precomputed -dir in out both 2>&1 > ../LOG_dataset.txt &
+
 if __name__ == '__main__':
     for d in args.datasetdir:
         dname = path.basename(path.dirname(path.join(d,'docs')))
