@@ -6,6 +6,8 @@ Created on Mon Nov 19 11:38:02 2018
 from segtok.segmenter import split_multi
 from segtok.tokenizer import web_tokenizer, split_contractions
 
+from sklearn.metrics import pairwise_distances
+
 from pyspark import SparkContext, SparkConf, StorageLevel
 from pyspark.sql import SparkSession
 
@@ -118,7 +120,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         return csr_matrix(X.mean(axis=0))
     @staticmethod
     def _max_pooling_(X):
-        return csr_matrix(X.max(axis=0))
+        return csr_matrix(X.tocsr().max(axis=0))
     @staticmethod
     def _sum_pooling_(X):
         return csr_matrix(X.sum(axis=0))
@@ -136,7 +138,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         raise ValueError("%s pooling does not available." % pooling) 
     
     # Algorithm methods
-    # Transform methods
+    # ===================== Transform methods =====================
     def _tranform_pyspark_(self, list_of_docs, _assignment_, _pooling_):
         
         rdd_of_docs = self._sc_.parallelize(list_of_docs, 100)
@@ -183,7 +185,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             return matrix
         return _co_convert_to_sparse_matrix_
 
-    # Fit methods
+    # ======================== Fit methods ========================
     def _build_clusters_pyspark_(self, list_of_docs, verbose=False):
         # (stage 0) Create repartitions
         rdd_of_docs = self._sc_.parallelize(list_of_docs, 100)#.repartition(multiprocessing.cpu_count()*10)
@@ -196,9 +198,11 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
-        rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile, self.metric) )
+        if self.metric != 'precomputed':
+            rdd_of_matrix = rdd_of_matrix.map( BoTG._convert_matrix_pyspark_(self.metric) )
+        rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile) )
         rdd_of_matrix = rdd_of_matrix.flatMap( BoTG._build_term_representation_pyspark_ )
-        rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x[1]) > 0 )
+        rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x) > 0 )
         rdd_of_matrix = rdd_of_matrix.zipWithIndex().map( lambda x: (x[0][0], x[1], x[0][1]))
         rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_ ).groupByKey().sortByKey().mapValues(list)
 
@@ -226,10 +230,16 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             return (term, M, docs_within)
         return _co_create_matrix_pyspark_
     @staticmethod
-    def _predict_clusterer_pyspark_(quantile, metric):
+    def _convert_matrix_pyspark_(metric):
+        def _co_convert_matrix_pyspark_(x):
+            term, M, docs_within = x
+            return (term, pairwise_distances(M, metric=metric), docs_within)
+        return _co_convert_matrix_pyspark_
+    @staticmethod
+    def _predict_clusterer_pyspark_(quantile):
         def _co_predict_clusterer_pyspark_(x):
             term, M, docs_within = x
-            clusters = cluster.DBSCAN(n_jobs=1, eps=quantile, min_samples=int(np.sqrt(M.shape[0])), metric=metric).fit_predict(M) 
+            clusters = cluster.DBSCAN(n_jobs=1, eps=quantile, min_samples=int(np.sqrt(M.shape[0])), metric="precomputed").fit_predict(M) 
             return (term, clusters, docs_within)
         return _co_predict_clusterer_pyspark_
     @staticmethod
@@ -261,8 +271,9 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         cpu_count = multiprocessing.cpu_count()
         memory = psutil.virtual_memory().free
         
-        executor_memory = max(int(0.5*memory), 471859200)
-        driver_memory = memory - executor_memory
+        executor_memory = max(int(0.8*memory), 5*1024*1024*1024)            # at least 5G
+        driver_memory   = max((memory - executor_memory), 5*1024*1024*1024)
+
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
         spark_config = spark_config.setMaster("local[%d]" % cpu_count)
@@ -271,7 +282,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         spark_config = spark_config.set("spark.driver.memory", "%d" % driver_memory)
 
         spark_config = spark_config.set("spark.cleaner.periodicGC.interval", "1min")
-        spark_config = spark_config.set("spark.memory.fraction", "0.9")
+        #spark_config = spark_config.set("spark.memory.fraction", "0.9")
         
         spark_config = spark_config.set("spark.executor.heartbeatInterval", "1000s")
         spark_config = spark_config.set("spark.network.timeout", "10000s")
