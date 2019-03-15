@@ -261,7 +261,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         cpu_count = multiprocessing.cpu_count()
         memory = psutil.virtual_memory().free
         
-        executor_memory = max(int(0.3*memory), 471859200)
+        executor_memory = max(int(0.5*memory), 471859200)
         driver_memory = memory - executor_memory
         spark_config = SparkConf()
         spark_config = spark_config.setAppName("BoTG_pySpark")
