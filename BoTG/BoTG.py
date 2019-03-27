@@ -50,6 +50,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._set_spark_(spark)
         self._set_direction_(direction)
 
+        self._partition_size_ = 128
+
         self._model_rdd_=None
         """
         self.memory_strategy = memory_strategy
@@ -141,15 +143,17 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     # ===================== Transform methods =====================
     def _tranform_pyspark_(self, list_of_docs, _assignment_, _pooling_):
         
-        rdd_of_docs = self._sc_.parallelize(list_of_docs, 100)
+        rdd_of_docs = self._sc_.parallelize(list_of_docs, self._partition_size_)
 
-        rdd_of_docs = rdd_of_docs.zipWithIndex().flatMap( BoTG._build_each_term_vectors_(self._get_subgraph_) )#.filter( lambda x: len(x[1][1].nodes) > 1 )
+        rdd_of_docs = rdd_of_docs.zipWithIndex()
+        rdd_of_docs = rdd_of_docs.flatMap( BoTG._build_each_term_vectors_(self._get_subgraph_) )
 
         joined_terms_doc = rdd_of_docs.join( self._model_rdd_ ) # result in [ (term, ((idx_doc, subgraph), ([(idx_cluster,subcluster)]))) ] 
         joined_terms_doc = joined_terms_doc.map( BoTG._assignment_vector_(self.dissimilarity_func, _assignment_, self._n_clusters) )
 
         mapped_term_values = joined_terms_doc.groupByKey().mapValues(BoTG._convert_to_sparse_matrix_(self._n_clusters)).mapValues(_pooling_)
-        mapped_term_values.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        #mapped_term_values.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        mapped_term_values.persist(StorageLevel.MEMORY_AND_DISK)
         
         result = mapped_term_values.collect()
         
@@ -188,7 +192,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     # ======================== Fit methods ========================
     def _build_clusters_pyspark_(self, list_of_docs, verbose=False):
         # (stage 0) Create repartitions
-        rdd_of_docs = self._sc_.parallelize(list_of_docs, 100)#.repartition(multiprocessing.cpu_count()*10)
+        rdd_of_docs = self._sc_.parallelize(list_of_docs, self._partition_size_)#.repartition(multiprocessing.cpu_count()*10)
         
         # (stage 1) flatMap: Create terms occurences
         index_of_docs = rdd_of_docs.flatMap( BoTG._create_index_pyspark_(self._get_subgraph_) )#.filter(lambda x: len(x[1].nodes) > 1)
@@ -207,7 +211,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_ ).groupByKey().sortByKey().mapValues(list)
 
         self._model_rdd_ = rdd_of_matrix
-        self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        #self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK_SER)
+        self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK)
 
         self._n_clusters = self._model_rdd_.map(lambda x: max( [xs[0] for xs in x[1]] ) ).max()+1
         self._unique_terms = self._model_rdd_.count()

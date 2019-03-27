@@ -38,6 +38,14 @@ class Document(object):
         self.__build_graph__()
         self.__norm_graph__(kernel=self.__get_kernel__(kernel))
     @staticmethod
+    def build_docs(docs_text, n_jobs=multiprocessing.cpu_count(), verbose=False, **kwargs):
+        docs = []
+        docs_text = [ (doc_text, kwargs) for doc_text in docs_text ]
+        with Pool(processes=n_jobs) as p:
+            for doc in tqdm(p.imap(Document._build_document_, docs_text), total=len(docs_text), desc="Building documents", disable=not verbose):
+                docs.append(doc)
+        return docs
+    @staticmethod
     def load_document(filepath, **kwargs):
         with open(filepath, "rb") as filin:
             text = filin.read().decode(errors='ignore')
@@ -45,6 +53,9 @@ class Document(object):
     @staticmethod
     def _load_document_(param):
          return Document.load_document(param[0], **param[1])
+    @staticmethod
+    def _build_document_(param):
+         return Document(param[0], **param[1])
     @staticmethod
     def load_path(filepattern, n_jobs=multiprocessing.cpu_count(), verbose=False, **kwargs):
         docs = []
