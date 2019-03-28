@@ -53,15 +53,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._partition_size_ = 128
 
         self._model_rdd_=None
-        """
-        self.memory_strategy = memory_strategy
-        if self.memory_strategy == 'norm':
-            self._chunk_strategy = self._define_chunks_
-        elif self.memory_strategy == 'hard':
-            self._chunk_strategy = self._define_chunks_hard_
-        elif self.memory_strategy == 'soft':
-            self._chunk_strategy = self._define_chunks_soft_
-        """
+
     def __str__(self):
         if self._model_rdd_ is None:
             return "<BoTG(assig=%s, pooling=%s, metric=%s, direction=%s)>" % (self.assignment, self.pooling, self.metric, self.direction)
@@ -104,7 +96,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _unorm_assignment_(term, graph, dissimilarity_func, vector, clusters):
         for (idx_cluster, cluster) in clusters:
             vector[0,idx_cluster] = 1.-dissimilarity_func(graph, cluster, term)
-        return vector / vector.sum()
+        return vector
     def _get_assignment_function_(self, assignment):
         if assignment is None:
             assignment = self.assignment
@@ -251,6 +243,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _build_term_representation_pyspark_(x):
         (term, clusters, docs_within) = x
         mapper = [ (term, []) for i in range(max(clusters)+1) ]
+        if not len(mapper):
+            return [ (term, [ docs_within[i] for (i,x) in enumerate(clusters) ]) ]
         list(map(lambda x: mapper[x[1]][1].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
         return mapper
     @staticmethod
@@ -271,7 +265,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if format == 'filename':
             return Document.load_path(X, lan=self.lang, w=self.w)
     
-    # Only spark methods
+    # spark methods
     def _get_default_spark_config_(self):
         cpu_count = multiprocessing.cpu_count()
         memory = psutil.virtual_memory().free
