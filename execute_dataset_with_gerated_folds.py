@@ -45,6 +45,7 @@ parser.add_argument('-p','--pooling', type=str, nargs='+', help='', default=['me
 parser.add_argument('-a','--assignment', type=str, nargs='+', help='', default=['hard'], choices=['hard', 'unorm'])
 parser.add_argument('-m','--metric', type=str, nargs='+', help='', default=['cosine'])
 parser.add_argument('-dir','--direction', type=str, nargs='+', help='', default=['both'], choices=['in', 'out', 'both'])
+parser.add_argument('-tt', '--train_test', action="store_true", help='[Optional] (default=False) build only train_test fold (or, zero-based fold).')
 
 parser.add_argument('-o','--output', type=str, nargs='?', help='', default='output')
 
@@ -94,3 +95,5 @@ if __name__ == '__main__':
                                     X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
                                     dump_svmlight_file(X,y_test, path.join(args.output,filename_test))
                             botg.close()
+                            if args.train_test:
+                                break
