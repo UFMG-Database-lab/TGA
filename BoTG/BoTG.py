@@ -84,18 +84,29 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
     # Assingment functions
     @staticmethod
+    def _hard_idcf_assignment_(term, graph, dissimilarity_func, vector, clusters):
+        if len(clusters) == 0:
+            return vector
+        values = [ (id_cluster, (1.-dissimilarity_func(graph, cluster_graph, term)), IDCF) for (id_cluster, cluster_graph, IDCF) in clusters ]
+
+        idx_max, _, IDCF = max(values, key=lambda x: x[1] )
+        vector[0,idx_max] = IDCF
+        return vector
+    @staticmethod
     def _hard_assignment_(term, graph, dissimilarity_func, vector, clusters):
         if len(clusters) == 0:
             return vector
-        values = [ (id_cluster, 1.-dissimilarity_func(graph, cluster_graph, term)) for (id_cluster, cluster_graph) in clusters ]
+        values = [ (id_cluster, (1.-dissimilarity_func(graph, cluster_graph, term))*IDCF) for (id_cluster, cluster_graph, IDCF) in clusters ]
 
         idx_max = max(values, key=lambda x: x[1] )[0]
         vector[0,idx_max] = 1.
         return vector
     @staticmethod
     def _unorm_assignment_(term, graph, dissimilarity_func, vector, clusters):
-        for (idx_cluster, cluster) in clusters:
-            vector[0,idx_cluster] = 1.-dissimilarity_func(graph, cluster, term)
+        for (idx_cluster, cluster, IDCF) in clusters: #IDCF: Inverse Document-Context Frequency
+            vector[0,idx_cluster] = (1.-dissimilarity_func(graph, cluster, term)) * IDCF
+        #vector[0,idx_cluster] = vector[0,idx_cluster]/np.max(vector[0,idx_cluster])
+        #vector[0,idx_cluster] = vector[0,idx_cluster]/np.sum(vector[0,idx_cluster])
         return vector
     def _get_assignment_function_(self, assignment):
         if assignment is None:
@@ -140,7 +151,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_docs = rdd_of_docs.zipWithIndex()
         rdd_of_docs = rdd_of_docs.flatMap( BoTG._build_each_term_vectors_(self._get_subgraph_) )
 
-        joined_terms_doc = rdd_of_docs.join( self._model_rdd_ ) # result in [ (term, ((idx_doc, subgraph), ([(idx_cluster,subcluster)]))) ] 
+        joined_terms_doc = rdd_of_docs.join( self._model_rdd_ ) # result in [ (term, ((idx_doc, subgraph, DF), ([(idx_cluster,subcluster)]))) ] 
         joined_terms_doc = joined_terms_doc.map( BoTG._assignment_vector_(self.dissimilarity_func, _assignment_, self._n_clusters) )
 
         mapped_term_values = joined_terms_doc.groupByKey().mapValues(BoTG._convert_to_sparse_matrix_(self._n_clusters)).mapValues(_pooling_)
@@ -183,6 +194,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
 
     # ======================== Fit methods ========================
     def _build_clusters_pyspark_(self, list_of_docs, verbose=False):
+
+        self._n_docs = len(list_of_docs)
         # (stage 0) Create repartitions
         rdd_of_docs = self._sc_.parallelize(list_of_docs, self._partition_size_)#.repartition(multiprocessing.cpu_count()*10)
         
@@ -200,7 +213,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.flatMap( BoTG._build_term_representation_pyspark_ )
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x) > 0 )
         rdd_of_matrix = rdd_of_matrix.zipWithIndex().map( lambda x: (x[0][0], x[1], x[0][1]))
-        rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_ ).groupByKey().sortByKey().mapValues(list)
+        rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_(self._n_docs) ).groupByKey().sortByKey().mapValues(list)
 
         self._model_rdd_ = rdd_of_matrix
         #self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK_SER)
@@ -248,13 +261,16 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         list(map(lambda x: mapper[x[1]][1].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
         return mapper
     @staticmethod
-    def _join_subgraphs_(x):
-        (term, idd, subgraphs) = x
-        selected_subgraph = nx.DiGraph()
-        for subgraph in subgraphs:
-            selected_subgraph = _join_graph_(selected_subgraph, subgraph)
-        selected_subgraph = _norm_graph_(selected_subgraph)
-        return (term, (idd, selected_subgraph))
+    def _join_subgraphs_(N):
+        def _co_join_subgraphs_(x):
+            (term, idd, subgraphs) = x
+            selected_subgraph = nx.DiGraph()
+            for subgraph in subgraphs:
+                selected_subgraph = _join_graph_(selected_subgraph, subgraph)
+            selected_subgraph = _norm_graph_(selected_subgraph)
+            IDCF = np.log( N / len(subgraphs) )
+            return (term, (idd, selected_subgraph, IDCF ))
+        return _co_join_subgraphs_
 
     # General Methods
     def _get_documents_obj_(self, X, format, verbose=False):
