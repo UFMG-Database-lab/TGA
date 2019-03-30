@@ -77,22 +77,22 @@ if __name__ == '__main__':
                     for direction in args.direction: 
                         for eps in args.eps:
                             for f, (train_index, test_index) in enumerate(splits_folds):
+                                print("fold%d_%s_e%.2f_w%d_df%d_m-%s_dir-%s" % (f, dname, eps, w, df, m, direction))
                                 botg = BoTG(metric=m, min_df=df, direction=direction, quantile=eps)
                                 #botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
-                                print("fold%d_%s_e%.2f_w%d_df%d_m-%s_dir-%s" % (f, dname, eps, w, df, m, direction))
                                 docs_train, y_train = get_array(docs, train_index), get_array(y,train_index)
                                 print("fitting")
                                 botg.fit(docs_train, verbose=not args.silence)
                                 print("transforming %s" % botg)
                                 for p in args.pooling:
                                     for a in args.assignment:
-                                        filename_train = "train%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)
+                                        filename_train = "train%d_%s_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,eps,w,df,m,p,a)
                                         print("  %s" % filename_train)
                                         X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file(X,y_train, path.join(args.output,filename_train))
 
                                         docs_test, y_test = get_array(docs,test_index), get_array(y,test_index)
-                                        filename_test = "test%d_%s_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,w,df,m,p,a)
+                                        filename_test = "test%d_%s_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,eps,w,df,m,p,a)
                                         print("  %s" % filename_test)
                                         X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file(X,y_test, path.join(args.output,filename_test))
