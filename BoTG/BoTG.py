@@ -106,7 +106,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for (idx_cluster, cluster, IDCF) in clusters: #IDCF: Inverse Document-Context Frequency
             vector[0,idx_cluster] = (1.-dissimilarity_func(graph, cluster, term)) * IDCF
         #vector[0,idx_cluster] = vector[0,idx_cluster]/np.max(vector[0,idx_cluster])
-        #vector[0,idx_cluster] = vector[0,idx_cluster]/np.sum(vector[0,idx_cluster])
+        vector[0,] = vector[0,]/np.sum(vector[0,])
         return vector
     def _get_assignment_function_(self, assignment):
         if assignment is None:
@@ -216,7 +216,6 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_(self._n_docs) ).groupByKey().sortByKey().mapValues(list)
 
         self._model_rdd_ = rdd_of_matrix
-        #self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK_SER)
         self._model_rdd_.persist(StorageLevel.MEMORY_AND_DISK)
 
         self._n_clusters = self._model_rdd_.map(lambda x: max( [xs[0] for xs in x[1]] ) ).max()+1
@@ -256,8 +255,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _build_term_representation_pyspark_(x):
         (term, clusters, docs_within) = x
         mapper = [ (term, []) for i in range(max(clusters)+1) ]
-        if not len(mapper):
-            return [ (term, [ docs_within[i] for (i,x) in enumerate(clusters) ]) ]
+        #if not len(mapper):
+        #    return [ (term, [ docs_within[i] for (i,x) in enumerate(clusters) ]) ]
         list(map(lambda x: mapper[x[1]][1].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
         return mapper
     @staticmethod
