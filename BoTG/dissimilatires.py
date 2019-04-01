@@ -22,12 +22,14 @@ def dissimilarity_node_both(GA, GB, term):
     weightB = GB.node[term]['weight']
 
     neighborsGA = dict([((s,t),D['weight']) for s,t,D in  GA.in_edges(term, data=True)])
-    neighborsGA.update( dict([((s,t),D['weight']) for s,t,D in GA.out_edges(term, data=True)]) )
-
     neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.in_edges(term, data=True)])
-    neighborsGB.update( dict([((s,t),D['weight']) for s,t,D in GB.out_edges(term, data=True)]) )
+    in_diss = __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
-    return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
+    neighborsGA = dict([((s,t),D['weight']) for s,t,D in  GA.out_edges(term, data=True)])
+    neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.out_edges(term, data=True)])
+    out_diss = __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
+
+    return (in_diss+out_diss)/2.
 
 def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
     values_A = set(neighborsGA.keys())
