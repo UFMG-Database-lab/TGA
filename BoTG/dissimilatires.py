@@ -1,32 +1,38 @@
 
-def dissimilarity_node_out(GA, GB, term):
+def dissimilarity_node_out(GA, GB, term, term2=None):
+    if term2 is None:
+        term2 = term
     weightA = GA.node[term]['weight']
-    weightB = GB.node[term]['weight']
+    weightB = GB.node[term2]['weight']
 
     neighborsGA = dict([((s,t),D['weight']) for s,t,D in GA.out_edges(term, data=True)])
-    neighborsGB = dict([((s,t),D['weight']) for s,t,D in GB.out_edges(term, data=True)]) 
+    neighborsGB = dict([((s,t),D['weight']) for s,t,D in GB.out_edges(term2, data=True)]) 
     
     return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
-def dissimilarity_node_in(GA, GB, term):
+def dissimilarity_node_in(GA, GB, term, term2=None):
+    if term2 is None:
+        term2 = term
     weightA = GA.node[term]['weight']
-    weightB = GB.node[term]['weight']
+    weightB = GB.node[term2]['weight']
     
     neighborsGA = dict([(node,D['weight']) for node,_,D in  GA.in_edges(term, data=True)])
-    neighborsGB = dict([(node,D['weight']) for node,_,D in  GB.in_edges(term, data=True)])
+    neighborsGB = dict([(node,D['weight']) for node,_,D in  GB.in_edges(term2, data=True)])
 
     return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
-def dissimilarity_node_both(GA, GB, term):
+def dissimilarity_node_both(GA, GB, term, term2=None):
+    if term2 is None:
+        term2 = term
     weightA = GA.node[term]['weight']
-    weightB = GB.node[term]['weight']
+    weightB = GB.node[term2]['weight']
 
     neighborsGA = dict([((s,t),D['weight']) for s,t,D in  GA.in_edges(term, data=True)])
-    neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.in_edges(term, data=True)])
+    neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.in_edges(term2, data=True)])
     in_diss = __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
     neighborsGA = dict([((s,t),D['weight']) for s,t,D in  GA.out_edges(term, data=True)])
-    neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.out_edges(term, data=True)])
+    neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.out_edges(term2, data=True)])
     out_diss = __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
     return (in_diss+out_diss)/2.
