@@ -88,15 +88,16 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         if len(clusters) == 0:
             return vector
         values = [ (id_cluster, (1.-dissimilarity_func(graph, cluster_graph, term)), IDCF) for (id_cluster, cluster_graph, IDCF) in clusters ]
+        
+        idx_max, cluster_similarity, IDCF = max(values, key=lambda x: x[1] )
+        vector[0,idx_max] =  graph.node[term]['TF'] * cluster_similarity * IDCF
 
-        idx_max, _, IDCF = max(values, key=lambda x: x[1] )
-        vector[0,idx_max] = IDCF
         return vector
     @staticmethod
     def _hard_assignment_(term, graph, dissimilarity_func, vector, clusters):
         if len(clusters) == 0:
             return vector
-        values = [ (id_cluster, (1.-dissimilarity_func(graph, cluster_graph, term))*IDCF) for (id_cluster, cluster_graph, IDCF) in clusters ]
+        values = [ (id_cluster, (1.-dissimilarity_func(graph, cluster_graph, term))) for (id_cluster, cluster_graph, IDCF) in clusters ]
 
         idx_max = max(values, key=lambda x: x[1] )[0]
         vector[0,idx_max] = 1.
@@ -104,19 +105,33 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     @staticmethod
     def _unorm_assignment_(term, graph, dissimilarity_func, vector, clusters):
         for (idx_cluster, cluster, IDCF) in clusters: #IDCF: Inverse Document-Context Frequency
-            vector[0,idx_cluster] = (1.-dissimilarity_func(graph, cluster, term)) * IDCF
+            vector[0,idx_cluster] = (1.-dissimilarity_func(graph, cluster, term))
         #vector[0,idx_cluster] = vector[0,idx_cluster]/np.max(vector[0,idx_cluster])
-        vector[0,] = vector[0,]/np.sum(vector[0,])
+        vector[0,] = vector[0,] / np.sum(vector[0,])
+        return vector
+    @staticmethod
+    def _unorm_idcf_assignment_(term, graph, dissimilarity_func, vector, clusters):
+        for (idx_cluster, cluster, IDCF) in clusters: #IDCF: Inverse Document-Context Frequency
+            vector[0,idx_cluster] = graph.node[term]['TF'] * (1.-dissimilarity_func(graph, cluster, term)) * IDCF
+        #vector[0,idx_cluster] = vector[0,idx_cluster]/np.max(vector[0,idx_cluster])
+        vector[0,] = vector[0,] / np.sum(vector[0,])
         return vector
     def _get_assignment_function_(self, assignment):
         if assignment is None:
             assignment = self.assignment
         if callable(assignment):
             return assignment
+
         if assignment == 'hard':
             return BoTG._hard_assignment_
+        if assignment == 'hard_idcf':
+            return BoTG._hard_idcf_assignment_
+            
         if assignment == 'unorm':
             return BoTG._unorm_assignment_
+        if assignment == 'unorm_idcf':
+            return BoTG._unorm_idcf_assignment_
+        
         raise ValueError("%s assignment does not available." % assignment) 
 
     # Pooling functions
@@ -248,7 +263,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def _predict_clusterer_pyspark_(quantile):
         def _co_predict_clusterer_pyspark_(x):
             term, M, docs_within = x
-            clusters = cluster.DBSCAN(n_jobs=1, eps=quantile, min_samples=int(np.sqrt(M.shape[0])), metric="precomputed").fit_predict(M) 
+            clusters = cluster.DBSCAN(n_jobs=1, eps=quantile, min_samples=int(np.log(M.shape[0])), metric="precomputed").fit_predict(M) 
+            #clusters = cluster.DBSCAN(n_jobs=1, eps=quantile, min_samples=int(np.sqrt(M.shape[0])), metric="precomputed").fit_predict(M) 
             return (term, clusters, docs_within)
         return _co_predict_clusterer_pyspark_
     @staticmethod

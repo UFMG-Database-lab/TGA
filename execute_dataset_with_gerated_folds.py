@@ -43,7 +43,7 @@ parser.add_argument('-df','--min_df', type=int, nargs='+', help='', default=[2])
 parser.add_argument('-e','--eps', type=float, nargs='+', help='', default=[0.1])
 
 parser.add_argument('-p','--pooling', type=str, nargs='+', help='', default=['mean'], choices=['mean', 'max', 'sum'])
-parser.add_argument('-a','--assignment', type=str, nargs='+', help='', default=['hard'], choices=['hard', 'unorm'])
+parser.add_argument('-a','--assignment', type=str, nargs='+', help='', default=['hard'], choices=['hard', 'unorm', 'unorm_idcf', 'hard_idcf'])
 parser.add_argument('-m','--metric', type=str, nargs='+', help='', default=['cosine'])
 parser.add_argument('-dir','--direction', type=str, nargs='+', help='', default=['both'], choices=['in', 'out', 'both'])
 parser.add_argument('-tt', '--train_test', action="store_true", help='[Optional] (default=False) build only train_test fold (or, zero-based fold).')
