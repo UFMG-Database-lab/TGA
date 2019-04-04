@@ -86,13 +86,15 @@ if __name__ == '__main__':
                                 print("transforming %s" % botg)
                                 for p in args.pooling:
                                     for a in args.assignment:
-                                        filename_train = "train%d_%s_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,eps,w,df,m,p,a)
+                                        name_file_config = "%s_log_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (dname,eps,w,df,m,p,a)
+
+                                        filename_train = "train%d_%s" % (f,name_file_config)
                                         print("  %s" % filename_train)
                                         X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file(X,y_train, path.join(args.output,filename_train), zero_based=False)
 
                                         docs_test, y_test = get_array(docs,test_index), get_array(y,test_index)
-                                        filename_test = "test%d_%s_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (f,dname,eps,w,df,m,p,a)
+                                        filename_test = "test%d_%s" % (f,name_file_config)
                                         print("  %s" % filename_test)
                                         X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file(X,y_test, path.join(args.output,filename_test), zero_based=False)
