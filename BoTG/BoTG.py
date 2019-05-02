@@ -227,7 +227,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.map( BoTG._predict_clusterer_pyspark_(self.quantile) )
         rdd_of_matrix = rdd_of_matrix.flatMap( BoTG._build_term_representation_pyspark_ )
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x) > 0 )
-        rdd_of_matrix = rdd_of_matrix.zipWithIndex().map( lambda x: (x[0][0], x[1], x[0][1]))
+        rdd_of_matrix = rdd_of_matrix.zipWithIndex()
+        rdd_of_matrix = rdd_of_matrix.map( lambda x: (x[0][0], x[1], x[0][1]))
         rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_(self._n_docs) ).groupByKey().sortByKey().mapValues(list)
 
         self._model_rdd_ = rdd_of_matrix
@@ -248,7 +249,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
             M = np.zeros((len(docs_within), len(docs_within)), dtype=np.float)
             for i, graph_i in enumerate(docs_within):
                 j = i+1
-                values = np.array([ 1.-diss_func(graph_i, graph_j, term) for graph_j in docs_within[j:] ])
+                values = np.array([ diss_func(graph_i, graph_j, term) for graph_j in docs_within[j:] ])
                 M[i,j:] = values
                 M[j:,i] = values
             return (term, M, docs_within)

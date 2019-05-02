@@ -11,7 +11,11 @@ from sklearn.datasets import dump_svmlight_file
 import numpy as np
 
 import io
+import gzip
 
+def dump_svmlight_file_gz(X,y,filename):
+    with gzip.open(filename, 'w') as filout:
+        dump_svmlight_file(X, y, filout, zero_based=False)
 def readfile(filename):
     with io.open(filename, 'rt', newline='\n', encoding='utf8', errors='ignore') as filein:
         return filein.readlines()
@@ -48,17 +52,7 @@ parser.add_argument('-m','--metric', type=str, nargs='+', help='', default=['cos
 parser.add_argument('-dir','--direction', type=str, nargs='+', help='', default=['both'], choices=['in', 'out', 'both'])
 parser.add_argument('-tt', '--train_test', action="store_true", help='[Optional] (default=False) build only train_test fold (or, zero-based fold).')
 
-parser.add_argument('-o','--output', type=str, nargs='?', help='', default='output')
-
 args = parser.parse_args()
-
-if not path.exists(args.output):
-    try:
-        os.makedirs(args.output)
-    except:
-        print("Couldn't create the %s directory" % args.output)
-
-
 # Sample:
 
 # nohup python3 execute_dataset.py -d datasetpath -w 1 2 3 -df 2 3 4 -p mean max sum -a unorm hard -m cosine l2 precomputed -dir in out both 2>&1 > ../LOG_dataset.txt &
@@ -68,7 +62,10 @@ if __name__ == '__main__':
         dname = path.basename(path.dirname(d))
         doc_texts = readfile(path.join(d,'texts.txt'))
         y = list(map(int, readfile(path.join(d,'score.txt'))))
-        splits_folds = load_splits_ids(path.join(d, 'folds','split_%d.csv' % args.nfolds))
+        splits_folds = load_splits_ids(path.join(d, 'representations','split_%d.csv' % args.nfolds))
+
+        if args.train_test:
+            splits_folds = [splits_folds[0]]
 
         for w in args.window:
             docs = np.array(Document.build_docs(doc_texts, w=w, verbose=not args.silence))
@@ -81,23 +78,24 @@ if __name__ == '__main__':
                                 botg = BoTG(metric=m, min_df=df, direction=direction, quantile=eps)
                                 #botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
                                 docs_train, y_train = get_array(docs, train_index), get_array(y,train_index)
+                                docs_test, y_test = get_array(docs,test_index), get_array(y,test_index)
                                 print("fitting")
                                 botg.fit(docs_train, verbose=not args.silence)
                                 print("transforming %s" % botg)
                                 for p in args.pooling:
                                     for a in args.assignment:
-                                        name_file_config = "%s_log_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (dname,eps,w,df,m,p,a)
+                                        name_file_config = "BoTG_log_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (eps,w,df,m,p,a)
+                                        output_path =  path.join(d,name_file_config)
+                                        if not path.exists( output_path ):
+                                            os.makedirs(output_path)
 
-                                        filename_train = "train%d_%s" % (f,name_file_config)
-                                        print("  %s" % filename_train)
+                                        filename_train = "train%d.gz" % f
+                                        output_file = path.join(output_path,filename_train)
                                         X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
-                                        dump_svmlight_file(X,y_train, path.join(args.output,filename_train), zero_based=False)
+                                        dump_svmlight_file_gz(X,y_train, output_file)
 
-                                        docs_test, y_test = get_array(docs,test_index), get_array(y,test_index)
-                                        filename_test = "test%d_%s" % (f,name_file_config)
-                                        print("  %s" % filename_test)
+                                        filename_test = "test%d.gz" % (f,name_file_config)
+                                        output_file = path.join(output_path,filename_test)
                                         X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
-                                        dump_svmlight_file(X,y_test, path.join(args.output,filename_test), zero_based=False)
+                                        dump_svmlight_file_gz(X,y_test, output_file)
                                 botg.close()
-                                if args.train_test:
-                                    break
