@@ -85,17 +85,19 @@ if __name__ == '__main__':
                                 for p in args.pooling:
                                     for a in args.assignment:
                                         name_file_config = "BoTG_log_e%.2f_w%d_df%d_m-%s_p-%s_a-%s" % (eps,w,df,m,p,a)
-                                        output_path =  path.join(d,name_file_config)
+                                        output_path =  path.join(d,'representations', f'{args.nfolds}-folds', name_file_config)
                                         if not path.exists( output_path ):
                                             os.makedirs(output_path)
 
                                         filename_train = "train%d.gz" % f
                                         output_file = path.join(output_path,filename_train)
+                                        print(output_file)
                                         X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file_gz(X,y_train, output_file)
 
                                         filename_test = "test%d.gz" % f
                                         output_file = path.join(output_path,filename_test)
+                                        print(output_file)
                                         X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file_gz(X,y_test, output_file)
                                 botg.close()
