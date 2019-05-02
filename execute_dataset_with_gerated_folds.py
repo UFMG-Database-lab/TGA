@@ -94,7 +94,7 @@ if __name__ == '__main__':
                                         X = botg.transform(docs_train, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file_gz(X,y_train, output_file)
 
-                                        filename_test = "test%d.gz" % (f,name_file_config)
+                                        filename_test = "test%d.gz" % f
                                         output_file = path.join(output_path,filename_test)
                                         X = botg.transform(docs_test, pooling=p, assignment=a, verbose=not args.silence)
                                         dump_svmlight_file_gz(X,y_test, output_file)
