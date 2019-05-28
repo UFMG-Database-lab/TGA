@@ -45,6 +45,7 @@ parser.add_argument('-f','--nfolds', type=int, nargs='?', help='', default=5)
 parser.add_argument('-w','--window', type=int, nargs='+', help='', default=[2])
 parser.add_argument('-df','--min_df', type=int, nargs='+', help='', default=[2])
 parser.add_argument('-e','--eps', type=float, nargs='+', help='', default=[0.1])
+parser.add_argument('-s','--save', action="store_true", help='', default=False)
 
 parser.add_argument('-p','--pooling', type=str, nargs='+', help='', default=['mean'], choices=['mean', 'max', 'sum'])
 parser.add_argument('-a','--assignment', type=str, nargs='+', help='', default=['hard'], choices=['hard', 'unorm', 'unorm_idcf', 'hard_idcf'])
@@ -75,7 +76,11 @@ if __name__ == '__main__':
                         for eps in args.eps:
                             for f, (train_index, test_index) in enumerate(splits_folds):
                                 print("fold%d_%s_e%.2f_w%d_df%d_m-%s_dir-%s" % (f, dname, eps, w, df, m, direction))
-                                botg = BoTG(metric=m, min_df=df, direction=direction, quantile=eps)
+                                output_path = None
+                                if args.save:
+                                    name_file_config = f"GRAPH-BoTG-{f}_log_e{eps}_w{w}_df{df}_m-{m}"
+                                    output_path =  path.join(d,'representations', f'{args.nfolds}-folds', name_file_config)
+                                botg = BoTG(metric=m, min_df=df, direction=direction, quantile=eps, _to_save_=output_path)
                                 #botg = BoTG(metric=m, min_df=df, memory_strategy=args.memory_strategy)
                                 docs_train, y_train = get_array(docs, train_index), get_array(y,train_index)
                                 docs_test, y_test = get_array(docs,test_index), get_array(y,test_index)

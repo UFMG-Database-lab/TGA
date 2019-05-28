@@ -21,7 +21,7 @@ def dissimilarity_node_in(GA, GB, term, term2=None):
 
     return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
-def dissimilarity_node_both(GA, GB, term, term2=None):
+def dissimilarity_node_both_old(GA, GB, term, term2=None):
     if term2 is None:
         term2 = term
     weightA = GA.node[term]['weight']
@@ -36,6 +36,19 @@ def dissimilarity_node_both(GA, GB, term, term2=None):
     out_diss = __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
     return (in_diss+out_diss)/2.
+
+def dissimilarity_node_both(GA, GB, term, term2=None):
+    if term2 is None:
+        term2 = term
+    weightA = GA.node[term]['weight']
+    weightB = GB.node[term2]['weight']
+
+    neighborsGA = dict([((s,t),D['weight']) for s,t,D in  GA.in_edges(term, data=True)])
+    neighborsGA.update(dict([((s,t),D['weight']) for s,t,D in  GA.out_edges(term, data=True)]))
+
+    neighborsGB = dict([((s,t),D['weight']) for s,t,D in  GB.out_edges(term2, data=True)])
+    neighborsGB.update(dict([((s,t),D['weight']) for s,t,D in  GB.in_edges(term2, data=True)]))
+    return __compute_diss__(neighborsGA, weightA, neighborsGB, weightB)
 
 def __compute_diss__(neighborsGA, weightA, neighborsGB, weightB):
     values_A = set(neighborsGA.keys())

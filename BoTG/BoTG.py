@@ -8,6 +8,8 @@ from segtok.tokenizer import web_tokenizer, split_contractions
 
 from sklearn.metrics import pairwise_distances
 
+from collections import Counter
+
 from pyspark import SparkContext, SparkConf, StorageLevel
 from pyspark.sql import SparkSession
 
@@ -37,7 +39,7 @@ VALID_FORMATS = ['doc', 'raw', 'filename']
 
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
     def __init__(self, format_doc='doc', w=2, lang='en', min_df=2,
-    direction='both', metric='cosine', quantile=0.1, pooling='mean', assignment='hard', spark=None):
+    direction='both', metric='cosine', quantile=0.1, pooling='mean', assignment='hard', _to_save_=None, spark=None):
         self.format = self._validate_format_(format_doc)
         self.w = 2
         self.lang = lang
@@ -53,6 +55,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._partition_size_ = 128
 
         self._model_rdd_=None
+        self._to_save_ = _to_save_
 
     def __str__(self):
         if self._model_rdd_ is None:
@@ -219,6 +222,8 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         
         # (stage 2) groupByKey: Indexer
         index_of_docs = index_of_docs.groupByKey().mapValues(list)
+
+        index_of_docs = index_of_docs.map( BoTG._filter_df_edges_(self.quantile) ).filter( lambda x: len(x[1]) > 0 )
         
         # Create matrix of co-occurrence, predict clusters and build term representations
         rdd_of_matrix = index_of_docs.map( BoTG._create_matrix_pyspark_(self.dissimilarity_func) )
@@ -228,7 +233,18 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         rdd_of_matrix = rdd_of_matrix.flatMap( BoTG._build_term_representation_pyspark_ )
         rdd_of_matrix = rdd_of_matrix.filter( lambda x: len(x) > 0 )
         rdd_of_matrix = rdd_of_matrix.zipWithIndex()
-        rdd_of_matrix = rdd_of_matrix.map( lambda x: (x[0][0], x[1], x[0][1]))
+        rdd_of_matrix = rdd_of_matrix.map( lambda x: (x[0][0], x[1], x[0][1])) # 
+
+        if self._to_save_:
+            # such interesting commands on this result dir:
+            #   grep -E "[\(OutEdgeDataView\(\[\(.+]{6,11}" * > all_more_than_one_cluster_sample.txt
+            #       put all cluster with more than 5 and less than 10. The first OutEdgeDataView is always to the final representation
+            rdd_of_matrix.collect()
+            new_subgraphs = rdd_of_matrix.map( BoTG._format_to_save_graph_(self._n_docs) )
+            new_subgraphs = new_subgraphs.groupByKey().sortByKey().mapValues(list)
+            new_subgraphs = new_subgraphs.filter( lambda x: len(x[1]) > 1 )
+            new_subgraphs.saveAsTextFile(self._to_save_)
+
         rdd_of_matrix = rdd_of_matrix.map( BoTG._join_subgraphs_(self._n_docs) ).groupByKey().sortByKey().mapValues(list)
 
         self._model_rdd_ = rdd_of_matrix
@@ -237,6 +253,39 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         self._n_clusters = self._model_rdd_.map(lambda x: max( [xs[0] for xs in x[1]] ) ).max()+1
         self._unique_terms = self._model_rdd_.count()
         gc.collect()
+    @staticmethod
+    def _format_to_save_graph_(ndocs):
+        def _co_format_to_save_graph_(x):
+            (term, idd, subgraphs) = x
+            joined_graph = BoTG._join_subgraphs_(ndocs)(x)
+            return (term, (joined_graph[1][1].edges(data=True), [ subgraph.edges(data=True) for subgraph in subgraphs ]))
+        return _co_format_to_save_graph_
+        
+    @staticmethod
+    def _filter_df_edges_(quantile):
+        def _co_format_to_save_graph_(item):
+            term, subgraphs = item
+            all_edges = []
+            for subgraph in subgraphs:
+                all_edges.extend(subgraph.edges)
+            cc = Counter(all_edges)
+            if len(cc) == 0:
+                return term, []
+            min_occur = max( 1, max(cc.values())*quantile )
+            cc_result = {k: v for k, v in cc.items() if v > 1}
+            newsubgraphs = []
+            for subgraph in subgraphs:
+                to_remove = []
+                for (s,t) in subgraph.edges:
+                    if (s,t) not in cc_result:
+                        to_remove.append( (s,t) )
+                for (s,t) in to_remove:
+                    subgraph.remove_edge(s,t)
+                if len(subgraph.edges) > 0:
+                    newsubgraphs.append(subgraph)
+            return term, newsubgraphs
+        return _co_format_to_save_graph_
+
     @staticmethod
     def _create_index_pyspark_(_get_subgraph_):
         def _co_create_index_pyspark_(doc):
@@ -274,6 +323,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         mapper = [ (term, []) for i in range(max(clusters)+1) ]
         #if not len(mapper):
         #    return [ (term, [ docs_within[i] for (i,x) in enumerate(clusters) ]) ]
+        # return (term, [subgraph])
         list(map(lambda x: mapper[x[1]][1].append(docs_within[x[0]]), [ (i,x) for (i,x) in enumerate(clusters) if x >=0 ]))
         return mapper
     @staticmethod
