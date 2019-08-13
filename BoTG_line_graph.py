@@ -12,7 +12,7 @@ def metric(neighbors1, neighbors2):
     set_neigh1 = set(neighbors1)
     set_neigh2 = set(neighbors2)
     t_intersect = len(set_neigh1.intersection(set_neigh2))
-    return t_intersect/len(set_neigh1)
+    return (1.+t_intersect)/(1.+len(set_neigh1))
 
 def co_app2(x):
     (((source, neigh_source), (target, neigh_target)),weight) = x
@@ -37,7 +37,7 @@ def build_paths(g):
                             seen[(node_source,node_to_compare)] += att_target['weight'] + att_to_compare['weight']
     return seen
 class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structure
-    def __init__(self, eps=0.8, w=2, njobs=12):
+    def __init__(self, eps=None, w=2, njobs=12):
         self.eps = eps
         self.w = w
         self.njobs = njobs
@@ -45,23 +45,25 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
     def fit(self, X, y=None, verbose=False, **fit_params):
         Gs = [ doc.G for doc in Document.build_docs(X, w=self.w) ]
         self._N = len(Gs)
-        LGs = self._build_LG_(Gs)
-        list_of_valids = [ (g, idx, term) for (term, (g,idx)) in list(LGs.items()) if len(idx) > 1 ]
+        LGs = self._build_LG_(Gs, verbose=verbose)
+        list_of_valids = [ (g, term) for (term, g) in list(LGs.items()) if len(self._idf_[term]) > 1 ]
         random.shuffle(list_of_valids)
-        results = list(map( self.__build_representation_graph__, tqdm(list_of_valids, smoothing=0, disable=not verbose) ))
+        results = list(map( self.__build_representation_graph__, tqdm(list_of_valids, position=2, desc='Building Representations', total=len(list_of_valids), smoothing=0, disable=not verbose) ))
         #with pool.Pool(self.njobs) as p:
             #results = list(p.imap( __build_representation_graph__, tqdm(list_of_valids, disable=not verbose) ))
         self._build_model_(results)
     def transform(self, X, verbose=False):
         Gs = [ doc.G for doc in Document.build_docs(X, w=self.w) ]
         M = lil_matrix( (len(Gs), self.k) )
-        for docid, G in tqdm(enumerate(Gs), disable=not verbose):
-            for tid, term in enumerate(G.nodes):
+        for docid, G in tqdm(enumerate(Gs), desc='Transforming', position=2, total=len(Gs), disable=not verbose):
+            for term in G.nodes:
                 if term not in self._model_:
                     continue
+                TF_term = G.nodes[term]['TF']
+                degree_term = G.degree(term) + 1
                 for cluster_id, cluster in self._model_[term].items():
                     weight = metric( G.neighbors(term), cluster.neighbors(term) )
-                    M[docid,cluster_id] = weight*np.log( self._N/self._idf_[term] )
+                    M[docid,cluster_id] = weight*TF_term/degree_term*np.log( self._N/len(self._idf_[term]) )
         return M
     def _build_model_(self, old_dict):
         self.k = 0
@@ -69,17 +71,18 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         for (term, rep) in old_dict:
             self._model_[term] = {}
             for idx_cluster, cluster_repr in rep.items():
+                if term not in cluster_repr:
+                    continue
                 self._model_[term][self.k] = cluster_repr
                 self.k += 1
-        return self._model_, k
+        return self._model_
     def _build_LG_(self, Gs, verbose):
         LGs = {}
-        for docid,G in tqdm(enumerate(Gs), total=len(Gs), disable=not verbose):
+        for docid,G in tqdm(enumerate(Gs), position=2, desc='Building LG', total=len(Gs), disable=not verbose):
             for v in G.nodes:
                 if v not in LGs:
                     self._idf_[v] = set()
                     LGs[v] = nx.Graph()
-                LGs[v].append(docid)
                 self._idf_[v].add(docid)
                 LG_v = LGs[v]
                 all_edges = list(G.out_edges(v, data=True))
@@ -96,7 +99,7 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                         LG_v.edges[(s1,t1),(s2,t2)]['count'] += 1
                         LG_v.edges[(s1,t1),(s2,t2)]['sum']   += abs( att1['weight']-att2['weight'] )
                 LGs[v] = LG_v
-        for v, G in tqdm(LGs.items(), total=len(LGs), disable=not verbose):
+        for v, G in tqdm(LGs.items(), position=2, desc='Filtering LG', total=len(LGs), disable=not verbose):
             to_remove = []
             for s,t,att in G.edges(data=True):
                 if att['count'] < 2:
@@ -105,11 +108,23 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
                 G.remove_edge(s,t)
         return LGs
     def __build_representation_graph__(self, x):
-        (g, idx, term) = x
+        (g, term) = x
         for s,t,att in g.edges(data=True):
             g.edges[ (s,t) ]['weight'] = att['count']/( g.degree(s) + g.degree(t) + 1 )
         seen = build_paths(g)
-        mmax = max(1,int(self.eps*len(seen)))
+        N = len(seen)
+        if N == 0:
+            clustered_graph = nx.Graph()
+            for (s,t) in g.nodes:
+                clustered_graph.add_edge(s,t)
+            return term,{0: clustered_graph}
+
+        if self.eps:
+            mmax = max(1,int(self.eps*len(seen)))
+        else:
+            adaptadive_eps = (N*np.log(N+1))/(N*np.sqrt(N))
+            mmax = max(1,int(adaptadive_eps*N))
+
         top_seen = sorted( seen.items(), key=lambda x: x[1], reverse=True )[:mmax]
 
         top_seen = [ (((source,g[source]), (target,g[target])),weight) for ((source, target),weight) in top_seen ]
@@ -118,12 +133,22 @@ class BoTG(BaseEstimator, TransformerMixin): # based on TfidfTransformer structu
         final_graph = nx.Graph()
         for ((s,t), weight) in best_repr:
             final_graph.add_edge( s,t, weight=1./(weight+1.) )
+
         nodeslist=final_graph.nodes
         if len(nodeslist) == 0 or len(final_graph.edges) == 0:
-            return term,{0: g}
+            clustered_graph = nx.Graph()
+            for (s,t) in g.nodes:
+                clustered_graph.add_edge(s,t)
+            return term,{0: clustered_graph}
+
         M = nx.to_scipy_sparse_matrix(final_graph, weight='weight', nodelist=nodeslist)
+
         if M.shape[0] == 0 or M.shape[1] == 0:
-            return term,{0: g}
+            clustered_graph = nx.Graph()
+            for (s,t) in g.nodes:
+                clustered_graph.add_edge(s,t)
+            return term,{0: clustered_graph}
+
         nclusters = max(1,int(np.log(M.shape[0])))
         clustering = KMeans(n_clusters=nclusters, n_jobs=self.njobs)
         labels = clustering.fit_predict(M)
