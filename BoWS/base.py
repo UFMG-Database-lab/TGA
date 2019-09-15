@@ -11,6 +11,8 @@ from multiprocessing import Pool,cpu_count
 
 from sklearn.base import clone as clone_estimator
 
+from sklearn.model_selection import StratifiedKFold
+
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
@@ -28,6 +30,14 @@ from itertools import repeat
 from sklearn.decomposition import TruncatedSVD
 
 import matplotlib.pyplot as plt
+
+from nltk.stem.snowball import SnowballStemmer
+from nltk import word_tokenize
+stemmer = SnowballStemmer("english")
+class StemmedCountVectorizer(CountVectorizer):
+    def build_analyzer(self):
+        analyzer = super(CountVectorizer, self).build_analyzer()
+        return lambda doc: (stemmer.stem(w) for w in analyzer(doc))
 
 def generate_lines(X):
     for i in range(X.shape[0]):
@@ -58,7 +68,7 @@ class BoWS(BaseEstimator, TransformerMixin):
     def __init__(self, min_df=2, stop_words='english', alpha=0.1):
         self.min_df = min_df
         self.stop_words = stop_words
-        self._cv = CountVectorizer(min_df=self.min_df, stop_words=self.stop_words)
+        self._cv = StemmedCountVectorizer(min_df=self.min_df, stop_words=self.stop_words)
         self._le = LabelEncoder()
         self.alpha = alpha
         self._fitted_ = False
@@ -188,9 +198,14 @@ class OneVsAllGridClassifier(object):
             X_class = X_multiclass[c]
             
             y_transformed = self.transform_y(y,c)
-            self.weak_gs.fit(X_class, y_transformed)
+            weak_gs_atual = clone_estimator(self.weak_gs)
+
+            #ocskf = StratifiedShuffleSplit(n_splits=self.cv)
+            #weak_gs_atual.set_params(cv=ocskf)
             
-            clf = clone_estimator(self.weak_clf).set_params(**self.weak_gs.best_params_)
+            weak_gs_atual.fit(X_class, y_transformed)
+            
+            clf = clone_estimator(self.weak_clf).set_params(**weak_gs_atual.best_params_)
             
             self.clf_by_class[c] = clf.fit(X_class, y_transformed)
             X_probs.append( clf.predict_proba( X_class )[:,1] )
