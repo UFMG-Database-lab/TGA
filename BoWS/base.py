@@ -35,6 +35,10 @@ import matplotlib.pyplot as plt
 from nltk.stem.snowball import SnowballStemmer
 from nltk import word_tokenize
 stemmer = SnowballStemmer("english")
+class StemmedTfidfVectorizer(TfidfVectorizer):
+    def build_analyzer(self):
+        analyzer = super(TfidfVectorizer, self).build_analyzer()
+        return lambda doc: (stemmer.stem(w) for w in analyzer(doc))
 class StemmedCountVectorizer(CountVectorizer):
     def build_analyzer(self):
         analyzer = super(CountVectorizer, self).build_analyzer()
@@ -69,7 +73,7 @@ class BoWS(BaseEstimator, TransformerMixin):
     def __init__(self, min_df=2, stop_words='english', alpha=0.1):
         self.min_df = min_df
         self.stop_words = stop_words
-        self._cv = StemmedCountVectorizer(min_df=self.min_df, stop_words=self.stop_words)
+        self._cv = StemmedTfidfVectorizer(min_df=self.min_df, stop_words=self.stop_words)
         self._le = LabelEncoder()
         self.alpha = alpha
         self._fitted_ = False
@@ -86,7 +90,8 @@ class BoWS(BaseEstimator, TransformerMixin):
         X_texts = list(X_texts)
         y = list(scores)
             
-        X = self._build_binary_cooccur_matrix_(X_texts)
+        X_TF = self._cv.fit_transform(X_texts).tocsr() 
+        X = self._build_binary_cooccur_matrix_(X_TF)
         y = self._normalize_y_(y)
         
         self._build_auxiliar_features(X, y)
@@ -103,13 +108,13 @@ class BoWS(BaseEstimator, TransformerMixin):
         if not self._fitted_:
             raise TypeError("The model did'nt fit yet!")
             
-        X = self._cv.transform(X_texts)
+        X_TF = self._cv.transform(X_texts).tocsr() 
+        X = self._build_binary_cooccur_matrix_(X_TF)
         X_classes = {}
         for c in range(self.C_):
-            X_classes[self._le.inverse_transform([c])[0]] = transform_class_repr(X, self.models_[c].copy())
+            X_classes[self._le.inverse_transform([c])[0]] = transform_class_repr(X, self.models_[c].copy()).multiply(X_TF)
         return X_classes
-    def _build_binary_cooccur_matrix_(self, texts):
-        X_TF = self._cv.fit_transform(texts).tocsr()    
+    def _build_binary_cooccur_matrix_(self, X_TF):
         X = sp.csr_matrix( ( np.ones(len(X_TF.data)), X_TF.nonzero() ), shape=X_TF.shape )
         del X_TF
         return X
@@ -175,9 +180,10 @@ class BoWS(BaseEstimator, TransformerMixin):
 
 class OneVsAllGridClassifier(object):
     def __init__(self, weak_params, weak_classifier, meta_params, meta_classifier,
-                 cv=5, n_jobs=12, scoring='f1_micro', iid=True):
+                 undersampler=None, cv=5, n_jobs=12, scoring='f1_micro', iid=True):
         self.cv = cv
         self.n_jobs = n_jobs
+        self.undersampler = undersampler
         
         self.weak_clf = clone_estimator(weak_classifier)
         self.weak_params = weak_params
@@ -189,7 +195,10 @@ class OneVsAllGridClassifier(object):
         
         self.clf_by_class = {}
         self._fitted_ = False
-        
+    def get_undersamplig(self, X, y):
+        if self.undersampler is None:
+            return X, y
+        return self.undersampler.fit_resample(X, y)
     def fit(self, X_multiclass, y):
         self.classes_ = sorted( list(X_multiclass.keys()) )
         self.classes_mapper_ = { k:i for (i,k) in enumerate(self.classes_) }
@@ -197,20 +206,26 @@ class OneVsAllGridClassifier(object):
         X_probs = []
         for c in self.classes_:
             X_class = X_multiclass[c]
-            
             y_transformed = self.transform_y(y,c)
+            X_resampled, y_resampled = self.get_undersamplig(X_class, y_transformed)
+
             weak_gs_atual = clone_estimator(self.weak_gs)
             
-            weak_gs_atual.fit(X_class, y_transformed)
+            weak_gs_atual.fit(X_resampled, y_resampled)
             
             clf = clone_estimator(self.weak_clf).set_params(**weak_gs_atual.best_params_)
-
-            cccv = CalibratedClassifierCV(clf, cv=self.cv)
+            if "n_jobs" in clf.get_params():
+                clf.set_params(n_jobs = self.n_jobs)
+            if "predict_proba" in dir(clf):
+                cccv = clf
+            else:
+                cccv = CalibratedClassifierCV(clf, cv=self.cv)
             
-            self.clf_by_class[c] = cccv.fit(X_class, y_transformed)
+            self.clf_by_class[c] = cccv.fit(X_resampled, y_resampled)
             X_probs.append( cccv.predict_proba( X_class ) )
-            
-        X_probs = np.concatenate(X_probs).T
+        #print(X_probs)
+        X_probs = np.concatenate(X_probs, axis=1)
+        #print(X_probs.shape, X_probs[0])
         self.meta_gs.fit(X_probs, y)
         self.meta_clf.set_params(**self.meta_gs.best_params_)
         self.meta_clf.fit(X_probs, y)
@@ -233,7 +248,7 @@ class OneVsAllGridClassifier(object):
         for c in self.classes_:
             X_class = X_multiclass[c]
             X_probs.append( self.clf_by_class[c].predict_proba( X_class ) )
-        return np.matrix(X_probs).T
+        return np.concatenate(X_probs, axis=1) 
     def transform_y(self, y, c):
         return np.array([ a_ == c for a_ in y ], dtype=int)
     def fit_predict(self, X_multiclass, y):

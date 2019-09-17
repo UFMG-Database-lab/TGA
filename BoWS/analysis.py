@@ -4,6 +4,9 @@ import io
 from sklearn.metrics import f1_score,confusion_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import LinearSVC
+from imblearn.under_sampling import NearMiss
+from sklearn.calibration import CalibratedClassifierCV
 
 import argparse
 import json
@@ -58,9 +61,14 @@ required_args = parser.add_argument_group('required arguments')
 required_args.add_argument('-d','--datasetdir', type=str, nargs='+', help='', required=True)
 
 parser.add_argument('-f','--nfolds', type=int, nargs='?', help='', default=5)
+parser.add_argument('-u','--undersample', type=int, nargs='?', help='', default=2)
 parser.add_argument('-o','--output', type=str, nargs='?', help='', default='tmp_output')
 
 args = parser.parse_args()
+if args.undersample == 0:
+    undersampler = None
+else:
+    undersampler = NearMiss(version=args.undersample)
 
 for datasetdir in args.datasetdir:
     texts,scores = read_dataset(datasetdir)
@@ -78,9 +86,12 @@ for datasetdir in args.datasetdir:
         bows = BoWS(min_df=2)
         X_train_transformed = bows.fit_transform(X_train, y_train)
 
-        weak_clf = LogisticRegression(random_state=42, max_iter=1000)
-        weak_params = {'penalty': ['l1', 'l2'], 'class_weight': ['balanced', None], 'solver': ['liblinear'], 'C': [1, 10, 0.1, 0.01]}
-        #weak_params = {'penalty': ['l2'], 'class_weight': [None], 'solver': ['liblinear'], 'C': [0.01]}
+        #weak_clf = LogisticRegression(random_state=42, max_iter=1000)
+        #weak_params = {'penalty': ['l1', 'l2'], 'class_weight': ['balanced', None], 'solver': ['liblinear'], 'C': [1, 10, 0.1, 0.01]}
+        
+        weak_clf = LinearSVC(random_state=42, max_iter=100000)
+        weak_params = {'C': [1, 10, 0.1, 0.01]}
+
         meta_clf = DecisionTreeClassifier()
         meta_params = { 'criterion': [ "gini", "entropy" ], 'max_depth': [None, 2, 4, 6], 'min_samples_split': [2,4,6], 'min_samples_leaf': [1, 2, 4, 6] }
 
@@ -89,8 +100,16 @@ for datasetdir in args.datasetdir:
         y_pred = oal.fit_predict(X_train_transformed, y_train)
         fold_output['y_train_pred'] = y_pred
 
-        fold_output['weak_classifier'] = { str(c): { 'classifier': str(type(weak_class)), 'params': weak_class.get_params() }  for c, weak_class in oal.clf_by_class.items() }
-        
+
+        # ERRO: O GET PARAMS TA PEGANDO OS PARAMETROS 
+        fold_output['weak_classifier'] = {}
+        for c, weak_class in oal.clf_by_class.items():
+            fold_output['weak_classifier'][str(c)] = {}
+            wc = weak_class
+            if type(weak_class) is CalibratedClassifierCV:
+                wc = weak_class.base_estimator
+            fold_output['weak_classifier'][str(c)]['classifier'] = str(type(wc))
+            fold_output['weak_classifier'][str(c)]['params'] = wc.get_params()
 
         X_test = get_array(texts, test_ids)
         X_test_transformed = bows.transform(X_test)
