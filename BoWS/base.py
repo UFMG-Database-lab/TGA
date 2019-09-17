@@ -208,7 +208,7 @@ class OneVsAllGridClassifier(object):
             cccv = CalibratedClassifierCV(clf, cv=self.cv)
             
             self.clf_by_class[c] = cccv.fit(X_class, y_transformed)
-            X_probs.append( clf.predict_proba( X_class ) )
+            X_probs.append( cccv.predict_proba( X_class ) )
             
         X_probs = np.matrix(X_probs).T
         self.meta_gs.fit(X_probs, y)
