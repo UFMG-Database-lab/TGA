@@ -210,7 +210,7 @@ class OneVsAllGridClassifier(object):
             self.clf_by_class[c] = cccv.fit(X_class, y_transformed)
             X_probs.append( cccv.predict_proba( X_class ) )
             
-        X_probs = np.matrix(X_probs).T
+        X_probs = np.concatenate(X_probs).T
         self.meta_gs.fit(X_probs, y)
         self.meta_clf.set_params(**self.meta_gs.best_params_)
         self.meta_clf.fit(X_probs, y)
