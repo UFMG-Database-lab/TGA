@@ -10,6 +10,7 @@ from tqdm import tqdm
 from multiprocessing import Pool,cpu_count
 
 from sklearn.base import clone as clone_estimator
+from sklearn.calibration import CalibratedClassifierCV
 
 from sklearn.model_selection import StratifiedKFold
 
@@ -199,16 +200,15 @@ class OneVsAllGridClassifier(object):
             
             y_transformed = self.transform_y(y,c)
             weak_gs_atual = clone_estimator(self.weak_gs)
-
-            #ocskf = StratifiedShuffleSplit(n_splits=self.cv)
-            #weak_gs_atual.set_params(cv=ocskf)
             
             weak_gs_atual.fit(X_class, y_transformed)
             
             clf = clone_estimator(self.weak_clf).set_params(**weak_gs_atual.best_params_)
+
+            cccv = CalibratedClassifierCV(clf, cv=self.cv)
             
-            self.clf_by_class[c] = clf.fit(X_class, y_transformed)
-            X_probs.append( clf.predict_proba( X_class )[:,1] )
+            self.clf_by_class[c] = cccv.fit(X_class, y_transformed)
+            X_probs.append( clf.predict_proba( X_class ) )
             
         X_probs = np.matrix(X_probs).T
         self.meta_gs.fit(X_probs, y)
@@ -222,12 +222,8 @@ class OneVsAllGridClassifier(object):
     def predict(self, X_multiclass):
         if not self._fitted_ :
             raise Exception("Model did'nt fit.")
-        X_probs = []
-        for c in self.classes_:
-            X_class = X_multiclass[c]
-            X_probs.append( self.clf_by_class[c].predict_proba( X_class )[:,1] )
-        
-        y_pred = self.meta_clf.predict(np.matrix(X_probs).T)
+        X_probs = self.predict_proba_weak(X_multiclass)
+        y_pred = self.meta_clf.predict(X_probs)
         return y_pred
     
     def predict_proba_weak(self, X_multiclass):
@@ -236,7 +232,7 @@ class OneVsAllGridClassifier(object):
         X_probs = []
         for c in self.classes_:
             X_class = X_multiclass[c]
-            X_probs.append( self.clf_by_class[c].predict_proba( X_class )[:,1] )
+            X_probs.append( self.clf_by_class[c].predict_proba( X_class ) )
         return np.matrix(X_probs).T
     def transform_y(self, y, c):
         return np.array([ a_ == c for a_ in y ], dtype=int)
