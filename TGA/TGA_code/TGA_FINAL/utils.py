@@ -14,6 +14,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.base import BaseEstimator, TransformerMixin
 import networkx as nx
 import io
+from nltk.corpus import stopwords
+
 import re
 from collections import Counter
 import scipy.sparse as sp
@@ -215,10 +217,11 @@ class Dataset(object):
         self.available_splits = set(map(lambda x: path.basename(x)[6:-4], splits_files ))
 
 class GraphsizePretrained(BaseEstimator, TransformerMixin):
-    def __init__(self, w=2, pretrained_vec='glove.6B.100d', verbose=False):
+    def __init__(self, w=2, pretrained_vec='glove.6B.100d', stopwords='remove', verbose=False):
         super(GraphsizePretrained, self).__init__()
         self.w = w
         self.pretrained_vec = pretrained_vec
+        self.stopwords = stopwords
         self.embeddings_dict = {}
         
         if not verbose:
@@ -226,13 +229,26 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
         else:
             from tqdm import tqdm
             self.progress_bar = tqdm
+        zero_based_stopword = np.array([])
+        if self.stopwords == "mark":
+            zero_based_stopword = np.array([0])
         with open(self.pretrained_vec, 'r') as f:
             for line in self.progress_bar(f):
                 values = line.split()
                 word = values[0]
                 vector = np.asarray(values[1:], "float32")
-                self.ndim = len(vector)
+                vector = np.concatenate((vector,zero_based_stopword))
+                self.ndim = len(vector) + zero_based_stopword.size
                 self.embeddings_dict[word] = vector
+        if self.stopwords == "mark":
+            stopwords_list = stopwords.words('english')
+            for stp in stopwords_list:
+                if stp in self.embeddings_dict:
+                    self.embeddings_dict[stp][-1] = 1
+        if self.stopwords == "remove":
+            stopwords_list = stopwords.words('english')
+            list(map(self.embeddings_dict.pop, [stp for stp in stopwords_list if stp in self.embeddings_dict]))
+
         self.vocab = { word: i for (i,word) in enumerate( self.embeddings_dict.keys() ) }
         self.vocab_idx = [ k for k,v in sorted(self.vocab.items(), key=lambda x: x[1]) ]
         
@@ -415,26 +431,34 @@ class ClassifierGAT(nn.Module):
         self.encoder = nn.Linear(in_dim, hidden_dim).to(torch.device(device))
         
         self.layers = nn.ModuleList([
-            GATConv(hidden_dim, hidden_dim, num_heads=n_heads, activation=F.leaky_relu,
+            GATConv(hidden_dim, hidden_dim, residual=True, num_heads=n_heads, activation=F.leaky_relu,
                     feat_drop=drop, attn_drop=attn_drop).to(torch.device(device)),
-            GATConv(n_heads*hidden_dim, hidden_dim, num_heads=n_heads, activation=F.leaky_relu,
+            GATConv(hidden_dim, hidden_dim, residual=True, num_heads=n_heads, activation=F.leaky_relu,
                     feat_drop=drop, attn_drop=attn_drop).to(torch.device(device))
         ])
+
+        self.down_proj = [
+            nn.Linear(n_heads*hidden_dim, hidden_dim).to(torch.device(device)),
+            nn.Linear(n_heads*hidden_dim, hidden_dim).to(torch.device(device))
+        ]
         
-        self.lin = nn.Linear(n_heads*hidden_dim + hidden_dim, 1).to(torch.device(device))
+        self.lin = nn.Linear(hidden_dim + hidden_dim, 1).to(torch.device(device))
         self.pooling = GlobalAttentionPooling( self.lin ).to(torch.device(device))
         
-        self.norm = nn.BatchNorm1d( n_heads*hidden_dim + hidden_dim )
+        self.norm = nn.BatchNorm1d( hidden_dim + hidden_dim )
         self.drop = nn.Dropout(drop)
         
-        self.classify = nn.Linear( n_heads*hidden_dim + hidden_dim, n_classes).to(torch.device(device))
+        self.classify = nn.Linear( hidden_dim + hidden_dim, n_classes).to(torch.device(device))
+
     def transform(self, G):
         h = G.ndata['f']
         he = self.encoder(h)
         h = he
-        for conv in self.layers:
+        for l, conv in enumerate(self.layers):
             h = conv(G, h)
             h = h.view(h.shape[0], -1)
+            # apply normlayer and scalling the dot-product attentions by the square-root
+            h = self.down_proj[l]( h )
         # CONCAT he E hg
         hg = torch.cat((h,he), 1)
         hg = self.norm( hg )
@@ -451,18 +475,17 @@ class ClassifierGAT(nn.Module):
         h = G.ndata['f']
         he = self.encoder(h)
         h = he
-        for conv in self.layers:
+        for l, conv in enumerate(self.layers):
             h = conv(G, h)
             h = h.view(h.shape[0], -1)
-        
-        # CONCAT he E hg
+            h = self.down_proj[l]( h )
+        # CONCAT he AND h
         hg = torch.cat((h,he), 1)
         hg = self.norm( hg )
         hg = self.drop( hg )
         hg = self.pooling(G, hg)
-        
-        pred = self.classify( hg )
-        return pred
+
+        return self.classify( hg )
 
 class FocalLoss(nn.Module):
     # https://github.com/mbsariyildiz/focal-loss.pytorch
