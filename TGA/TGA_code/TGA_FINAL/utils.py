@@ -14,7 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.base import BaseEstimator, TransformerMixin
 import networkx as nx
 import io
-from nltk.corpus import stopwords
+from nltk.corpus import stopwords as stopwords_by_lang
 
 import re
 from collections import Counter
@@ -241,12 +241,12 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
                 self.ndim = len(vector) + zero_based_stopword.size
                 self.embeddings_dict[word] = vector
         if self.stopwords == "mark":
-            stopwords_list = stopwords.words('english')
+            stopwords_list = stopwords_by_lang.words('english')
             for stp in stopwords_list:
                 if stp in self.embeddings_dict:
                     self.embeddings_dict[stp][-1] = 1
         if self.stopwords == "remove":
-            stopwords_list = stopwords.words('english')
+            stopwords_list = stopwords_by_lang.words('english')
             list(map(self.embeddings_dict.pop, [stp for stp in stopwords_list if stp in self.embeddings_dict]))
 
         self.vocab = { word: i for (i,word) in enumerate( self.embeddings_dict.keys() ) }
@@ -277,12 +277,13 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
             cooccur_count.update( terms_to_add )
         
         G = nx.Graph()
-        G.add_nodes_from( [ (k,{'idx': k}) for k in sorted_terms ] )
+        G.add_nodes_from( [ (k,{'idx': k, 'emb': self.embeddings_dict[self.vocab_idx[k]]}) for k in sorted_terms ] )
         w_edges = [ (s,t,w) for ((s,t),w) in cooccur_count.items() ]
         G.add_weighted_edges_from( w_edges, weight='freq' )
         
-        return G, np.array([ self.embeddings_dict[self.vocab_idx[termid]] for termid in sorted_terms ])
-        
+        #return G, np.array([ self.embeddings_dict[self.vocab_idx[termid]] for termid in sorted_terms ])
+        return G
+    
 class Graphsize(BaseEstimator, TransformerMixin):
     def __init__(self, lang='english', w=2, min_df=2, max_feat=999999999, feature_type='prob', stem=True, analyzer=None, verbose=False):
         super(Graphsize, self).__init__()
