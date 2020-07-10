@@ -13,6 +13,8 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.base import BaseEstimator, TransformerMixin
 import networkx as nx
+
+from sklearn.preprocessing import LabelEncoder
 import io
 from nltk.corpus import stopwords as stopwords_by_lang
 
@@ -223,6 +225,7 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
         self.pretrained_vec = pretrained_vec
         self.stopwords = stopwords
         self.embeddings_dict = {}
+        self.le = LabelEncoder()
         
         if not verbose:
             self.progress_bar = lambda x: x
@@ -253,37 +256,67 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
         self.vocab_idx = [ k for k,v in sorted(self.vocab.items(), key=lambda x: x[1]) ]
         
         self.analyzer = TfidfVectorizer(preprocessor=preprocessor)
-        
-    def fit(self, X, y=None):
+    
+    def fit(self, X, y):
         self.N = len(X)
+        y_train = self.le.fit_transform( y )
+        self.n_class = len(self.le.classes_)
+
+        self.label_ids = [ y for y in self.le.classes_ ]
+        for y in self.label_ids:
+            hotenc = np.zeros(300)
+            hotenc[y] = 1
+            self.embeddings_dict[y] = hotenc
+        
+        docs = list(map(self.analyzer.build_analyzer(), self.progress_bar(X)))
+        edges_to_add = set( [ (y,y) for y in self.label_ids] )
+        self.node_mapper = { y: y for y in self.label_ids }
+        for (doc,y) in zip( docs, y_train ):
+
+            doc_in_terms = set(filter( lambda x: x in self.embeddings_dict, doc))
+            terms_by_id = list(map(lambda x: self.node_mapper.setdefault(x, len(self.node_mapper)), doc_in_terms))
+
+            list_of_edges = list(map( lambda x: (y, x), terms_by_id ))
+            list_of_edges.extend(list(map( lambda x: (x, x), terms_by_id )))
+            list(map(edges_to_add.add, list_of_edges))
+
+        self.g = nx.Graph()
+        self.g.add_nodes_from( [ (idx, {'idx':idx, 'label': type(t) is not str, 'emb': self.embeddings_dict[t], 'term': t} ) for (t,idx) in self.node_mapper.items() ] )
+        self.g.add_edges_from( edges_to_add )
+        
         return self
    
     def transform(self, text):
-        docs = list(map(self.analyzer.build_analyzer(), self.progress_bar(text)))
-        result = list(map(self._build_graph_, self.progress_bar(docs)))
+        docs = list(map(self.analyzer.build_analyzer(), text))
+        result = list(map(self._build_graph_, docs))
         return result
     
     def _build_graph_(self, doc):
-        terms        = list(filter( lambda x: x in self.embeddings_dict, doc))
-        terms_ids    = [ self.vocab[word] for word in terms ]
+        terms        = list(filter( lambda x: x in self.node_mapper, doc))
+        local_mapper = { self.node_mapper[word]:word for word in set(terms) }
+        terms_ids    = [ self.node_mapper[word] for word in terms ]
         sorted_terms = sorted(list(set(terms_ids)))
 
         cooccur_count = Counter()
         for i,idt in enumerate(terms_ids):
-            terms_to_add = terms_ids[ max(i-self.w, 0):i ]
+            terms_to_add = terms_ids[ max(i-self.w, 0):(i+1) ]
             terms_to_add = list(zip(terms_to_add, repeat(idt)))
             terms_to_add = list(map(sorted,terms_to_add))
             terms_to_add = list(map(tuple,terms_to_add))
             cooccur_count.update( terms_to_add )
         
         G = nx.Graph()
-        G.add_nodes_from( [ (k,{'idx': k, 'emb': self.embeddings_dict[self.vocab_idx[k]]}) for k in sorted_terms ] )
+        G.add_nodes_from( [ (idx,{'term': word,'idx':idx, 'emb': self.embeddings_dict[word]}) for (idx,word) in local_mapper.items() ] )
         w_edges = [ (s,t,w) for ((s,t),w) in cooccur_count.items() ]
         G.add_weighted_edges_from( w_edges, weight='freq' )
         
         #return G, np.array([ self.embeddings_dict[self.vocab_idx[termid]] for termid in sorted_terms ])
         return G
     
+    def collate(self, param):
+        X, y = zip(*param)
+        Gs = self.transform(X)
+        return Gs, y
 class Graphsize(BaseEstimator, TransformerMixin):
     def __init__(self, lang='english', w=2, min_df=2, max_feat=999999999, feature_type='prob', stem=True, analyzer=None, verbose=False):
         super(Graphsize, self).__init__()
