@@ -262,7 +262,7 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
         y_train = self.le.fit_transform( y )
         self.n_class = len(self.le.classes_)
 
-        self.label_ids = [ y for y in self.le.classes_ ]
+        self.label_ids = [ y for y in range(self.n_class) ]
         for y in self.label_ids:
             hotenc = np.zeros(300)
             hotenc[y] = 1
@@ -274,14 +274,14 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
         for (doc,y) in zip( docs, y_train ):
 
             doc_in_terms = set(filter( lambda x: x in self.embeddings_dict, doc))
-            terms_by_id = list(map(lambda x: self.node_mapper.setdefault(x, len(self.node_mapper)), doc_in_terms))
+            terms_by_nid = list(map(lambda x: self.node_mapper.setdefault(x, len(self.node_mapper)), doc_in_terms))
 
-            list_of_edges = list(map( lambda x: (y, x), terms_by_id ))
-            list_of_edges.extend(list(map( lambda x: (x, x), terms_by_id )))
+            list_of_edges = list(map( lambda x: (y, x), terms_by_nid ))
+            list_of_edges.extend(list(map( lambda x: (x, x), terms_by_nid )))
             list(map(edges_to_add.add, list_of_edges))
 
         self.g = nx.Graph()
-        self.g.add_nodes_from( [ (idx, {'idx':idx, 'label': type(t) is not str, 'emb': self.embeddings_dict[t], 'term': t} ) for (t,idx) in self.node_mapper.items() ] )
+        self.g.add_nodes_from( [ (nid, {'idx': [nid], 'label': int(type(t) is not str), 'emb': self.embeddings_dict[t], 'term': t} ) for (t,nid) in self.node_mapper.items() ] )
         self.g.add_edges_from( edges_to_add )
         
         return self
@@ -294,19 +294,18 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
     def _build_graph_(self, doc):
         terms        = list(filter( lambda x: x in self.node_mapper, doc))
         local_mapper = { self.node_mapper[word]:word for word in set(terms) }
-        terms_ids    = [ self.node_mapper[word] for word in terms ]
-        sorted_terms = sorted(list(set(terms_ids)))
+        terms_nids   = [ self.node_mapper[word] for word in terms ]
 
         cooccur_count = Counter()
-        for i,idt in enumerate(terms_ids):
-            terms_to_add = terms_ids[ max(i-self.w, 0):(i+1) ]
-            terms_to_add = list(zip(terms_to_add, repeat(idt)))
+        for i,nid in enumerate(terms_nids):
+            terms_to_add = terms_nids[ max(i-self.w, 0):(i+1) ]
+            terms_to_add = list(zip(terms_to_add, repeat(nid)))
             terms_to_add = list(map(sorted,terms_to_add))
             terms_to_add = list(map(tuple,terms_to_add))
             cooccur_count.update( terms_to_add )
         
         G = nx.Graph()
-        G.add_nodes_from( [ (idx,{'term': word,'idx':idx, 'emb': self.embeddings_dict[word]}) for (idx,word) in local_mapper.items() ] )
+        G.add_nodes_from( [ (nid,{'term': word,'idx':[nid], 'emb': self.embeddings_dict[word]}) for (nid,word) in local_mapper.items() ] )
         w_edges = [ (s,t,w) for ((s,t),w) in cooccur_count.items() ]
         G.add_weighted_edges_from( w_edges, weight='freq' )
         
