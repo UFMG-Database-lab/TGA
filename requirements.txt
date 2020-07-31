@@ -1,9 +1,12 @@
 segtok
-sklearn
-pyspark
 scipy
 networkx
 numpy
-psutil
 tqdm
 nltk
+torchvision
+torch
+dgl-cu101
+scikit-learn
+matplotlib
+notebook
