@@ -235,14 +235,24 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
         zero_based_stopword = np.array([])
         if self.stopwords == "mark":
             zero_based_stopword = np.array([0])
-        with open(self.pretrained_vec, 'r') as f:
-            for line in self.progress_bar(f):
-                values = line.split()
-                word = values[0]
-                vector = np.asarray(values[1:], "float32")
-                vector = np.concatenate((vector,zero_based_stopword))
-                self.ndim = len(vector) + zero_based_stopword.size
-                self.embeddings_dict[word] = vector
+        
+        if self.pretrained_vec.lower().endswith('.zip'):
+            import zipfile
+            fil = zipfile.ZipFile(self.pretrained_vec)
+            f   = fil.open(fil.filelist[0].filename)
+            fil.close()
+        else:
+            f = open(self.pretrained_vec, 'r')
+
+        for line in self.progress_bar(f):
+            values = line.split()
+            word = values[0]
+            vector = np.asarray(values[1:], "float32")
+            vector = np.concatenate((vector,zero_based_stopword))
+            self.ndim = len(vector) + zero_based_stopword.size
+            self.embeddings_dict[word] = vector
+        f.close()
+
         if self.stopwords == "mark":
             stopwords_list = stopwords_by_lang.words('english')
             for stp in stopwords_list:
