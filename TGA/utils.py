@@ -274,7 +274,7 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
 
         self.label_ids = [ y for y in range(self.n_class) ]
         for y in self.label_ids:
-            hotenc = np.zeros(300)
+            hotenc = np.zeros(self.ndim)
             hotenc[y] = 1
             self.embeddings_dict[y] = hotenc
         
