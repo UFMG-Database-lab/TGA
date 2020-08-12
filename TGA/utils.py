@@ -219,7 +219,7 @@ class Dataset(object):
         self.available_splits = set(map(lambda x: path.basename(x)[6:-4], splits_files ))
 
 class GraphsizePretrained(BaseEstimator, TransformerMixin):
-    def __init__(self, w=2, pretrained_vec='glove.6B.100d', stopwords='remove', verbose=False):
+    def __init__(self, w=2, pretrained_vec='glove.6B.100d', stopwords='remove', encoding='utf-8', verbose=False):
         super(GraphsizePretrained, self).__init__()
         self.w = w
         self.pretrained_vec = pretrained_vec
@@ -240,13 +240,15 @@ class GraphsizePretrained(BaseEstimator, TransformerMixin):
             import zipfile
             fil = zipfile.ZipFile(self.pretrained_vec)
             f   = fil.open(fil.filelist[0].filename)
+            prepro = lambda x: str(x.decode(encoding))
             fil.close()
         else:
+            prepro = lambda x: x
             f = open(self.pretrained_vec, 'r')
 
         for line in self.progress_bar(f):
             values = line.split()
-            word = values[0]
+            word = prepro(values[0])
             vector = np.asarray(values[1:], "float32")
             vector = np.concatenate((vector,zero_based_stopword))
             self.ndim = len(vector) + zero_based_stopword.size
