@@ -1,9 +1,9 @@
 import torch
-import dgl
+#import dgl
 import torch.nn as nn
 import torch.nn.functional as F
-from dgl.nn.pytorch.conv import GraphConv, GATConv
-from dgl.nn.pytorch.glob import GlobalAttentionPooling
+#from dgl.nn.pytorch.conv import GraphConv, GATConv
+#from dgl.nn.pytorch.glob import GlobalAttentionPooling
 from itertools import repeat
 from glob import glob
 from collections import namedtuple
