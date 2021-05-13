@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 #from dgl.nn.pytorch.conv import GraphConv, GATConv
 #from dgl.nn.pytorch.glob import GlobalAttentionPooling
+from multiprocessing import Pool
 from itertools import repeat
 from glob import glob
 from collections import namedtuple
@@ -14,14 +15,24 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.base import BaseEstimator, TransformerMixin
 import networkx as nx
 
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS as stop_words
 from sklearn.preprocessing import LabelEncoder
 import io
 from nltk.corpus import stopwords as stopwords_by_lang
+
+from tqdm import tqdm
 
 import re
 from collections import Counter
 import scipy.sparse as sp
 import numpy as np
+
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
+
 
 replace_patterns = [
     ('<[^>]*>', ''),                                    # remove HTML tags
@@ -62,6 +73,108 @@ def preprocessor(text):
         text = re.sub(pattern, replace, text)
     text = text.lower()
     return text
+
+class Tokenizer(BaseEstimator, TransformerMixin):
+    def __init__(self, mindf=2, stopwords='remove', model='list', lan='english', k=25, verbose=False):
+        super(Tokenizer, self).__init__()
+        self.mindf = mindf
+        self.le = LabelEncoder()
+        self.verbose = verbose
+        self.stopwords = stopwords
+        self.stopwordsSet = stop_words
+        self.lan = lan
+        self.k = k
+        self.model = model
+        self.analyzer = TfidfVectorizer(preprocessor=preprocessor, min_df=mindf)#.build_analyzer()
+        self.local_analyzer = self.analyzer.build_analyzer()
+        self.analyzer.set_params( analyzer=self.local_analyzer )
+        #self.analyzer.set_params( analyzer=lambda x: map(ps.stem, local_analyzer(x)) )
+        #self.analyzer = tk.web_tokenizer
+    def analyzer_doc(self, doc):
+        return self.local_analyzer(doc)
+    def fit(self, X, y):
+        self.N = len(X)
+        y = self.le.fit_transform( y )
+        self.n_class = len(self.le.classes_)
+        tqdm
+
+        self.term_freqs = Counter()
+        
+        docs_in_terms = []
+        
+        with Pool(processes=18) as p:
+            #docs = map(self.local_analyzer, X)
+            for doc_in_terms in tqdm(p.imap(self.analyzer_doc, X), total=self.N, disable=not self.verbose):
+                doc_in_terms = list(set(map( self._filter_fit_, list(doc_in_terms) ))) 
+                docs_in_terms.extend(doc_in_terms)
+        
+        self.term_freqs.update(docs_in_terms)
+        self.node_mapper      = {'<BLANK>': 0}
+        self.term_freqs       = { term:v for (term,v) in self.term_freqs.items() if v >= self.mindf }    
+        self.node_mapper      = { term:self._get_idx_(term) for term in self.term_freqs.keys() if self._isrel_(term) }
+        self.node_mapper['<UNK>'] = len(self.node_mapper)
+        self.node_mapper['<BLANK>'] = 0
+        self.vocab_size = len(self.node_mapper)
+        
+        if self.model == 'topk' or self.model == 'sample':
+            self.fi_ = np.ones(self.vocab_size)
+            
+        return self
+    def _isrel_(self, term):
+        if self.stopwords == 'remove' and term in self.stopwordsSet:
+            return False
+        # put here your filter_functions
+        return True
+    def _get_idx_(self, term):
+        # put here your idx_set_functions
+        if self.stopwords == 'mark' and term in self.stopwordsSet:
+            return self.node_mapper.setdefault('<STPW>', len(self.node_mapper))
+        return self.node_mapper.setdefault(term, len(self.node_mapper))
+    def _filter_transform_(self, term):
+        if self.stopwords == 'mark' and term in self.stopwordsSet:
+            return '<STPW>'
+        if term not in self.node_mapper:
+            return '<UNK>'
+        return term
+    def _filter_fit_(self, term):
+        if self.stopwords == 'mark' and term in self.stopwordsSet:
+            return '<STPW>'
+        return term
+    def _model_(self, doc):
+        if self.model == 'set':
+            return set(doc)
+        if self.model == 'topk':
+            doc = list(set(doc))
+            doc = np.array(doc)
+            weigths = np.array([ self.fi_[t] for t in doc ])
+            doc = doc[(-weigths).argsort()[:self.k]]
+            return doc
+        if self.model == 'sample':
+            doc = list(set(doc))
+            if len(doc) > self.k:
+                doc = np.array(doc)
+                weigths = np.array([ self.fi_[t] for t in doc ])
+                weigths = softmax(weigths)
+                doc = np.random.choice(doc, size=self.k, replace=False, p=weigths)
+            return doc
+        return list(doc)
+    def transform(self, X, verbose=None):
+        verbose = verbose if verbose is not None else self.verbose
+        n = len(X)
+        doc_off = [0]
+        terms_idx = []
+        for i,doc_in_terms in tqdm(enumerate(map(self.analyzer_doc, X)), total=n, disable=not verbose):
+            doc_in_terms = filter( self._isrel_, doc_in_terms )
+            doc_in_terms = map( self._filter_transform_, doc_in_terms )
+            doc_in_terms = [ self.node_mapper[tid] for tid in doc_in_terms ]
+            doc_in_terms = self._model_(doc_in_terms)
+            if self.model == 'sorted':
+                doc_in_terms = sorted(doc_in_terms)
+            doc_off.append( len(doc_in_terms) )
+            terms_idx.extend( doc_in_terms )
+        return np.array( terms_idx ), np.array(doc_off)[:-1].cumsum()
+
+
 
 WithValFold = namedtuple('Fold', ['X_train', 'y_train', 'X_test', 'y_test', 'X_val', 'y_val'])
 Fold = namedtuple('Fold', ['X_train', 'y_train', 'X_test', 'y_test'])
