@@ -109,8 +109,8 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
         self.lan            = lan
         self.stopwords      = stopwords
         self.k              = int(k)
-        self.drop           = int(max_drop)
-        self._verbose        = _verbose
+        self.max_drop       = max_drop
+        self._verbose       = _verbose
         self._device        = _device
 
         self.n_jobs         = int(n_jobs)
@@ -162,7 +162,7 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
         self.maxF = int(round(np.log2(self._tokenizer.maxF+1))) 
         
         self._model     = AttentionTFIDF( vocab_size=self._tokenizer.vocab_size, hiddens=self.hiddens,
-                                        nclass=self._tokenizer.n_class, maxF=self.maxF, drop=self.drop ).to(self._device)
+                                        nclass=self._tokenizer.n_class, maxF=self.maxF, drop=self.max_drop ).to(self._device)
         
         
         
@@ -206,7 +206,7 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
                     total      += len(y)
                     y_pred      = pred_docs.argmax(axis=1)
                     correct    += (y_pred == y).sum().item()
-                    self._model.drop_ =  (correct/total)*self.drop
+                    self._model.drop_ =  (correct/total)*self.max_drop
                     
                     pbar.update( len(y) )
                     del doc_tids, TFs
