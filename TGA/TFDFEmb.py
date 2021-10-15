@@ -95,32 +95,31 @@ class AttentionTFIDF(nn.Module):
 
 class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, hiddens=300, mindf=2, lan='english', stopwords='nltk', k=512,
-                 max_drop=.85, _device=torch.device('cuda:0'),
+                 max_drop=.85,
                  batch_size = 64, lr=5e-3, weight_decay=5e-3,
                  nepochs = 1000, patience=10, factor=.95,
-                 n_jobs=cpu_count(),
-                 _verbose=False):
+                 n_jobs=cpu_count(), _device=torch.device('cuda:0'), _verbose=False):
         super(AttentionTFIDFClassifier, self).__init__()
 
         self._model         = None
         self._tokenizer     = None
-        self.nepochs        = nepochs
-        self.hiddens        = hiddens
-        self.mindf          = mindf
+        self.nepochs        = int(nepochs)
+        self.hiddens        = int(hiddens)
+        self.mindf          = int(mindf)
         self.lan            = lan
         self.stopwords      = stopwords
-        self.k              = k
-        self.drop           = max_drop
+        self.k              = int(k)
+        self.drop           = int(max_drop)
         self._verbose        = _verbose
         self._device        = _device
 
-        self.n_jobs         = n_jobs
+        self.n_jobs         = int(n_jobs)
         
         self.lr             = lr
         self.weight_decay   = weight_decay
-        self.patience       = patience
+        self.patience       = int(patience)
         self.factor         = factor
-        self.batch_size     = batch_size
+        self.batch_size     = int(batch_size)
         
         def collate_train(param):
             X, y = zip(*param)
@@ -140,13 +139,13 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
             X = zip(*param)
             doc_tids, TFs, DFs = self._tokenizer.transform(X, verbose=False)
             
-            doc_tids = pad_sequence(list(map(torch.LongTensor, doc_tids)), batch_first=True, padding_value=0).to(self._device)
+            doc_tids = pad_sequence(list(map(torch.LongTensor, doc_tids)), batch_first=True, padding_value=0)
 
             TFs = pad_sequence(list(map(torch.tensor, TFs)), batch_first=True, padding_value=0)
-            TFs = torch.LongTensor(torch.log2(TFs+1).round().long()).to(self._device)
+            TFs = torch.LongTensor(torch.log2(TFs+1).round().long())
 
             DFs = pad_sequence(list(map(torch.tensor, DFs)), batch_first=True, padding_value=0)
-            DFs = torch.LongTensor(torch.log2(DFs+1).round().long()).to(self._device)
+            DFs = torch.LongTensor(torch.log2(DFs+1).round().long())
 
             return doc_tids, TFs, DFs
         
@@ -252,8 +251,28 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
                         counter += 1
         
         self._model = best_model.to( self._device )
+
+        self._loss = best
+        self._acc  = best_acc
+
         return self
 
     def predict(self, X):
         if self._model is None or self._tokenizer is None:
             raise Exception("Not implemented yet!")
+        self._model.eval()
+        self._tokenizer.model = 'topk'
+        dataloader = DataLoader(X, batch_size=self.batch_size,
+                        shuffle=False, collate_fn=self.collate_predict, num_workers=self.n_jobs)
+        result = []
+        with torch.no_grad():
+            loss_val = 0.
+            for i, (doc_tids, TFs, DFs) in enumerate(dataloader):
+                doc_tids = doc_tids.to(self._device)
+                TFs = TFs.to(self._device)
+                DFs = DFs.to(self._device)
+
+                pred_docs,_,_ = self._model( doc_tids, TFs, DFs )
+                pred_docs     = torch.softmax(pred_docs, dim=1)
+                result.extend( list(pred_docs) )
+        return self._tokenizer.le.inverse_transform(np.array(result))

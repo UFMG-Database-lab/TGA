@@ -6,7 +6,7 @@ tqdm
 nltk
 torchvision
 torch
-dgl-cu101
 scikit-learn
 matplotlib
 notebook
+hyperopt
