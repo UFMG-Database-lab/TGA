@@ -10,7 +10,7 @@ space = {
     "batch_size": hp.quniform("batch_size", 8, 128, 32),
     "k": hp.quniform("k", 64, 512, 64),
     "max_drop": hp.uniform("max_drop", 0.3, 0.9),
-    "mindf": hp.quniform("mindf", 1, 4, 1),
+    "mindf": hp.quniform("mindf", 2, 4, 1),
     "stopwords": hp.choice("stopwords", ["nltk", "sklearn", None]),
 }
 

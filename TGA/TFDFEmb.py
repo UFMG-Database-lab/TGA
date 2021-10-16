@@ -97,7 +97,7 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, hiddens=300, mindf=2, lan='english', stopwords='nltk', k=512,
                  max_drop=.85,
                  batch_size = 64, lr=5e-3, weight_decay=5e-3,
-                 nepochs = 1000, patience=10, factor=.95,
+                 nepochs = 1000, patience=10, factor=.95, vocab_max_size = 300000,
                  n_jobs=cpu_count(), _device=torch.device('cuda:0'), _verbose=False):
         super(AttentionTFIDFClassifier, self).__init__()
 
@@ -110,6 +110,7 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
         self.stopwords      = stopwords
         self.k              = int(k)
         self.max_drop       = max_drop
+        self.vocab_max_size = vocab_max_size
         self._verbose       = _verbose
         self._device        = _device
 
