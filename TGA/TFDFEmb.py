@@ -135,8 +135,7 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
             DFs = torch.LongTensor(torch.log2(DFs+1).round().long())
 
             return doc_tids, TFs, DFs, torch.LongTensor(y)
-        def collate_predict(param):
-            X = zip(*param)
+        def collate_predict(X):
             doc_tids, TFs, DFs = self._tokenizer.transform(X, verbose=False)
             
             doc_tids = pad_sequence(list(map(torch.LongTensor, doc_tids)), batch_first=True, padding_value=0)
@@ -273,6 +272,11 @@ class AttentionTFIDFClassifier(BaseEstimator, ClassifierMixin):
                 DFs = DFs.to(self._device)
 
                 pred_docs,_,_ = self._model( doc_tids, TFs, DFs )
-                pred_docs     = torch.softmax(pred_docs, dim=1)
+                pred_docs     = torch.softmax(pred_docs, dim=1).argmax(axis=1).cpu().detach().numpy()
                 result.extend( list(pred_docs) )
         return self._tokenizer.le.inverse_transform(np.array(result))
+    def to(self, device):
+        self._device = device
+        if self._model is not None:
+            self._model.to(self._device)
+        return self

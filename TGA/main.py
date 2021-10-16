@@ -14,10 +14,10 @@ space = {
     "stopwords": hp.choice("stopwords", ["nltk", "sklearn", None]),
 }
 
-for fold in d.get_fold_instances(10, with_val=True):
+for (i,fold) in enumerate(d.get_fold_instances(10, with_val=True)):
     def hyperparameter_tuning_try(params):
         try:
-            class_att = AttentionTFIDFClassifier(**params, _verbose=False)
+            class_att = AttentionTFIDFClassifier(**params, nepochs=25, _verbose=False)
             print(class_att)
             class_att.fit( fold.X_train, fold.y_train, fold.X_val, fold.y_val )
             return {"loss": class_att._loss, "status": STATUS_OK }
@@ -30,9 +30,24 @@ for fold in d.get_fold_instances(10, with_val=True):
         fn=hyperparameter_tuning_try,
         space = space, 
         algo=tpe.suggest, 
-        max_evals=10, 
+        max_evals=15, 
         trials=trials
     )
 
     print("Best: {}".format(best))
+
+    
+    params = [ (label, value) if label != 'stopwords' else (label,["nltk", "sklearn", None][value]) for (label,value) in best.items() ]
+    params = dict( params )
+    class_att = AttentionTFIDFClassifier(**params, _verbose=True)
+    class_att.fit( fold.X_train, fold.y_train, fold.X_val, fold.y_val )
+
+    y_pred = class_att.predict( fold.X_test )
+
+    print(f"ACC_test fold {i}: {( y_pred == fold.y_test ).sum() / len(y_pred)}")
+
+
+
+    
+
 
