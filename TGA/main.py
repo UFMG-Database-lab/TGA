@@ -38,7 +38,7 @@ for (i,fold) in enumerate(d.get_fold_instances(10, with_val=True)):
         fn=hyperparameter_tuning_try,
         space = space, 
         algo=tpe.suggest, 
-        max_evals=15, 
+        max_evals=15*cpu_count(), 
         trials=trials
     )
 
