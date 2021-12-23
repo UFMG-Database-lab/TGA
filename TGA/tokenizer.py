@@ -119,7 +119,7 @@ def preprocessor(text):
 
 class Tokenizer(BaseEstimator, TransformerMixin):
     def __init__(self, mindf=2, lan='english', stopwordsSet='nltk', model='topk', k=500,
-                 vocab_max_size=99999999999, verbose=False):
+                 vocab_max_size=99999999999, ngram_range=(1,1), verbose=False):
         super(Tokenizer, self).__init__()
         self.mindf = mindf
         self.le = LabelEncoder()
@@ -133,7 +133,8 @@ class Tokenizer(BaseEstimator, TransformerMixin):
             self.stopwordsSet = []
         self.model =  model
         self.k     = k
-        self.analyzer = TfidfVectorizer(ngram_range=(1,2),stop_words=self.stopwordsSet,
+        self.ngram_range = ngram_range
+        self.analyzer = TfidfVectorizer(ngram_range=ngram_range,stop_words=self.stopwordsSet,
                                         max_features=vocab_max_size,
                                         preprocessor=preprocessor, min_df=mindf)#.build_analyzer()
         self.local_analyzer = self.analyzer.build_analyzer()
