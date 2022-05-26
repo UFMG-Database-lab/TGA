@@ -31,8 +31,8 @@ for (i,fold) in enumerate(d.get_fold_instances(10, with_val=True)):
         except:
             return { "status": STATUS_FAIL }
     
-    #trials = Trials()
-    trials = SparkTrials(parallelism=cpu_count())
+    trials = Trials()
+    #trials = SparkTrials(parallelism=cpu_count())
     
     best = fmin(
         fn=hyperparameter_tuning_try,
